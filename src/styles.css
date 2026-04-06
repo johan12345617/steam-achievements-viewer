@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    @apply bg-steam-dark text-steam-text;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-steam-darker;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-steam-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-steam-muted;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-steam-accent hover:bg-steam-accent-hover text-white font-semibold px-6 py-3 rounded-lg transition-all duration-200 shadow-steam hover:shadow-steam-lg transform hover:-translate-y-0.5 active:translate-y-0;
+  }
+
+  .btn-secondary {
+    @apply bg-steam-card hover:bg-steam-card-hover text-steam-text border border-steam-border hover:border-steam-accent font-semibold px-6 py-3 rounded-lg transition-all duration-200;
+  }
+
+  .card {
+    @apply bg-steam-card border border-steam-border rounded-xl shadow-card;
+  }
+
+  .card-hover {
+    @apply card hover:border-steam-accent hover:shadow-steam transition-all duration-200 hover:-translate-y-0.5;
+  }
+
+  .badge-unlocked {
+    @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .badge-locked {
+    @apply bg-gray-700/50 text-gray-500 border border-gray-600/30 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .input-steam {
+    @apply bg-steam-darker border border-steam-border text-steam-text-bright placeholder-steam-muted rounded-lg px-4 py-3 w-full focus:outline-none focus:border-steam-accent focus:ring-1 focus:ring-steam-accent transition-colors duration-200;
+  }
+
+  .progress-bar {
+    @apply h-2 bg-steam-darker rounded-full overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full bg-gradient-to-r from-steam-accent to-steam-teal rounded-full transition-all duration-700;
+  }
+
+  .progress-fill-gold {
+    @apply h-full bg-gradient-to-r from-yellow-500 to-steam-gold rounded-full transition-all duration-700;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-steam-accent to-steam-teal bg-clip-text text-transparent;
+  }
+
+  .text-gradient-gold {
+    @apply bg-gradient-to-r from-yellow-400 to-steam-gold bg-clip-text text-transparent;
+  }
+
+  .glass {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    @apply bg-steam-card/80 border border-steam-border/50;
+  }
+}
