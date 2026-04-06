@@ -164,8 +164,6 @@ import { SteamService } from '../../services/steam.service';
                     </h4>
                     <p class="text-steam-muted text-xs leading-relaxed">
                       Steam OpenID allows one-click authentication using your Steam account.
-                      It requires a backend server to handle the OAuth redirect and securely
-                      fetch your data using a Steam Web API key. See <strong class="text-steam-text">BACKEND.md</strong> for setup instructions.
                     </p>
                   </div>
                 }
