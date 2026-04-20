@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, delay, map, forkJoin, switchMap, catchError, tap } from 'rxjs';
+import { Observable, of, delay, map, forkJoin, switchMap, catchError, tap, shareReplay } from 'rxjs';
 import {
   PlayerSummary,
   OwnedGame,
@@ -56,6 +56,16 @@ interface BackendAchievementsResponse {
   error?: string;
 }
 
+interface BackendDashboardResponse {
+  totalGames: number;
+  totalAchievements: number;
+  unlockedAchievements: number;
+  topGamesWithStats: (BackendGame & { achievementsTotal: number; achievementsUnlocked: number; achievementPercentage: number })[];
+  recentUnlocks: { achievement: BackendMergedAchievement; game: BackendGame; unlockedAt: number }[];
+  rarestAchievement: BackendMergedAchievement | null;
+  rarestAchievementGame: BackendGame | null;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -74,6 +84,10 @@ export class SteamService {
     avatarFullUrl: "",
     personaState: 0
   });
+
+  // Request-level cache: avoids duplicate HTTP calls when multiple components load the same data
+  private readonly ownedGamesCache = new Map<string, Observable<OwnedGame[]>>();
+  private readonly basicGamesCache = new Map<string, Observable<OwnedGame[]>>();
 
   // ============================================================
   // MOCK DATA
@@ -460,13 +474,40 @@ export class SteamService {
     );
   }
 
+  /** Fast: returns owned games without achievement stats (one Steam API call). */
+  getBasicGames(steamId: string): Observable<OwnedGame[]> {
+    if (environment.offlineMode) {
+      return of(this.mockGames).pipe(delay(300));
+    }
+    if (!this.basicGamesCache.has(steamId)) {
+      const req$ = this.http.get<BackendGame[]>(`${this.api}/steam/games/${steamId}`).pipe(
+        map((games) => games.map((g) => this.mapGame(g))),
+        shareReplay(1),
+      );
+      this.basicGamesCache.set(steamId, req$);
+    }
+    return this.basicGamesCache.get(steamId)!;
+  }
+
+  /** Slow on first call: returns games with achievement counts. Result is cached server-side for 5 min. */
   getOwnedGames(steamId: string): Observable<OwnedGame[]> {
     if (environment.offlineMode) {
       return of(this.mockGames).pipe(delay(600));
     }
-    return this.http.get<BackendGame[]>(`${this.api}/steam/games-with-stats/${steamId}`).pipe(
-      map((games) => games.map((g) => this.mapGame(g))),
-    );
+    if (!this.ownedGamesCache.has(steamId)) {
+      const req$ = this.http.get<BackendGame[]>(`${this.api}/steam/games-with-stats/${steamId}`).pipe(
+        map((games) => games.map((g) => this.mapGame(g))),
+        shareReplay(1),
+      );
+      this.ownedGamesCache.set(steamId, req$);
+    }
+    return this.ownedGamesCache.get(steamId)!;
+  }
+
+  /** Call this on logout to clear cached data for the user. */
+  clearCache(steamId: string): void {
+    this.ownedGamesCache.delete(steamId);
+    this.basicGamesCache.delete(steamId);
   }
 
   getPlayerAchievements(appId: number, steamId: string): Observable<Achievement[]> {
@@ -519,13 +560,12 @@ export class SteamService {
     );
   }
 
-  getDashboardStats(steamId: string): Observable<DashboardStats> {
+  getDashboardData(steamId: string): Observable<{ stats: DashboardStats; topGames: OwnedGame[] }> {
     if (environment.offlineMode) {
       const allAchievements = Object.values(this.mockAchievements).flat();
       const unlocked = allAchievements.filter((a) => a.achieved);
       const unlockRate = allAchievements.length > 0
-        ? Math.round((unlocked.length / allAchievements.length) * 100)
-        : 0;
+        ? Math.round((unlocked.length / allAchievements.length) * 100) : 0;
       const rarestAchievement = unlocked
         .filter((a) => a.globalPercentage !== undefined)
         .sort((a, b) => (a.globalPercentage ?? 100) - (b.globalPercentage ?? 100))[0] ?? null;
@@ -539,71 +579,42 @@ export class SteamService {
           return { achievement: a, game, unlockedAt: new Date((a.unlockTime ?? 0) * 1000) };
         });
       return of({
-        totalGames: this.mockGames.length,
-        totalAchievements: allAchievements.length,
-        unlockedAchievements: unlocked.length,
-        unlockRate,
-        rarestAchievement,
-        recentUnlocks,
-      } as DashboardStats).pipe(delay(600));
+        stats: {
+          totalGames: this.mockGames.length,
+          totalAchievements: allAchievements.length,
+          unlockedAchievements: unlocked.length,
+          unlockRate,
+          rarestAchievement,
+          rarestAchievementGame: null,
+          recentUnlocks,
+        } as DashboardStats,
+        topGames: this.mockGames,
+      }).pipe(delay(600));
     }
 
-    // Online: fetch games-with-stats for totals, then fetch achievements for the
-    // 5 most recently played games to populate recent unlocks and rarest achievement.
-    return this.http.get<BackendGame[]>(`${this.api}/steam/games-with-stats/${steamId}`).pipe(
-      switchMap((rawGames) => {
-        const games = rawGames.map((g) => this.mapGame(g));
-        const totalAchievements = games.reduce((s, g) => s + (g.achievementsTotal ?? 0), 0);
-        const unlockedAchievements = games.reduce((s, g) => s + (g.achievementsUnlocked ?? 0), 0);
-        const unlockRate = totalAchievements > 0 ? Math.round((unlockedAchievements / totalAchievements) * 100) : 0;
+    return this.http.get<BackendDashboardResponse>(`${this.api}/steam/dashboard/${steamId}`).pipe(
+      map((res) => {
+        const unlockRate = res.totalAchievements > 0
+          ? Math.round((res.unlockedAchievements / res.totalAchievements) * 100) : 0;
 
-        // Pick top 5 recently played games with community stats to fetch full achievements
-        const recentGames = [...games]
-          .filter((g) => g.hasCommunityVisibleStats && (g.lastPlayed ?? 0) > 0)
-          .sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))
-          .slice(0, 5);
+        const recentUnlocks: RecentUnlock[] = res.recentUnlocks.map((u) => ({
+          achievement: this.mapAchievement(u.achievement),
+          game: this.mapGame(u.game),
+          unlockedAt: new Date((u.unlockedAt ?? 0) * 1000),
+        }));
 
-        if (recentGames.length === 0) {
-          return of({ totalGames: games.length, totalAchievements, unlockedAchievements, unlockRate, rarestAchievement: null, recentUnlocks: [] } as DashboardStats);
-        }
-
-        return forkJoin(
-          recentGames.map((game) =>
-            this.http.get<BackendAchievementsResponse>(`${this.api}/steam/achievements/${game.appId}/${steamId}`).pipe(
-              map((res) => ({ game, achievements: res.achievements.map((a) => this.mapAchievement(a)) })),
-              catchError(() => of({ game, achievements: [] as Achievement[] })),
-            ),
-          ),
-        ).pipe(
-          map((results) => {
-            const allUnlocks: RecentUnlock[] = [];
-            let rarestAchievement: Achievement | null = null;
-            let rarestPercent = 101;
-
-            for (const { game, achievements } of results) {
-              for (const a of achievements) {
-                if (a.achieved && a.unlockTime) {
-                  allUnlocks.push({ achievement: a, game, unlockedAt: new Date(a.unlockTime * 1000) });
-                }
-                if (a.achieved && a.globalPercentage !== undefined && a.globalPercentage < rarestPercent) {
-                  rarestPercent = a.globalPercentage;
-                  rarestAchievement = a;
-                }
-              }
-            }
-
-            return {
-              totalGames: games.length,
-              totalAchievements,
-              unlockedAchievements,
-              unlockRate,
-              rarestAchievement,
-              recentUnlocks: allUnlocks
-                .sort((a, b) => b.unlockedAt.getTime() - a.unlockedAt.getTime())
-                .slice(0, 8),
-            } as DashboardStats;
-          }),
-        );
+        return {
+          stats: {
+            totalGames: res.totalGames,
+            totalAchievements: res.totalAchievements,
+            unlockedAchievements: res.unlockedAchievements,
+            unlockRate,
+            rarestAchievement: res.rarestAchievement ? this.mapAchievement(res.rarestAchievement) : null,
+            rarestAchievementGame: res.rarestAchievementGame ? this.mapGame(res.rarestAchievementGame) : null,
+            recentUnlocks,
+          } as DashboardStats,
+          topGames: res.topGamesWithStats.map((g) => this.mapGame(g)),
+        };
       }),
     );
   }

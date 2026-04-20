@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -44,7 +44,7 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
             <input
               type="text"
               [value]="searchQuery()"
-              (input)="searchQuery.set($any($event.target).value)"
+              (input)="searchQuery.set($any($event.target).value); resetPage()"
               placeholder="Search games..."
               class="input-steam pl-11"
             />
@@ -54,7 +54,7 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
           <div class="flex gap-2">
             <select
               [value]="sortBy()"
-              (change)="sortBy.set($any($event.target).value)"
+              (change)="sortBy.set($any($event.target).value); resetPage()"
               class="input-steam w-auto pr-8 cursor-pointer"
             >
               <option value="name">Sort: Name</option>
@@ -65,7 +65,7 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
 
             <!-- Filter: show only completed -->
             <button
-              (click)="showOnlyCompleted.set(!showOnlyCompleted())"
+              (click)="showOnlyCompleted.set(!showOnlyCompleted()); resetPage()"
               [class]="showOnlyCompleted()
                 ? 'px-4 py-3 rounded-lg bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 font-medium text-sm transition-all duration-200'
                 : 'px-4 py-3 rounded-lg bg-steam-card border border-steam-border text-steam-muted hover:text-steam-text font-medium text-sm transition-all duration-200'"
@@ -108,7 +108,7 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
         } @else {
           <!-- Games grid -->
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-fade-in">
-            @for (game of filteredGames(); track game.appId) {
+            @for (game of paginatedGames(); track game.appId) {
               <a
                 [routerLink]="['/games', game.appId]"
                 class="card p-5 flex flex-col hover:border-steam-accent/60 hover:shadow-steam hover:-translate-y-1 transition-all duration-200 cursor-pointer group"
@@ -151,27 +151,29 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
                   {{ game.name }}
                 </h3>
 
-                <!-- Achievement count -->
-                <div class="flex items-center justify-between text-sm mb-3">
-                  <span class="text-steam-muted">
-                    <span class="text-steam-text font-semibold">{{ game.achievementsUnlocked }}</span>
-                    / {{ game.achievementsTotal }}
-                  </span>
-                  <span
-                    class="font-bold text-sm"
-                    [class]="getPercentageColor(game.achievementPercentage ?? 0)"
-                  >
-                    {{ game.achievementPercentage }}%
-                  </span>
-                </div>
-
-                <!-- Progress bar -->
-                <div class="progress-bar">
-                  <div
-                    [class]="(game.achievementPercentage ?? 0) === 100 ? 'progress-fill-gold' : 'progress-fill'"
-                    [style.width.%]="game.achievementPercentage ?? 0"
-                  ></div>
-                </div>
+                <!-- Achievement count / no achievements -->
+                @if ((game.achievementsTotal ?? 0) > 0) {
+                  <div class="flex items-center justify-between text-sm mb-3">
+                    <span class="text-steam-muted">
+                      <span class="text-steam-text font-semibold">{{ game.achievementsUnlocked }}</span>
+                      / {{ game.achievementsTotal }}
+                    </span>
+                    <span
+                      class="font-bold text-sm"
+                      [class]="getPercentageColor(game.achievementPercentage ?? 0)"
+                    >
+                      {{ game.achievementPercentage }}%
+                    </span>
+                  </div>
+                  <div class="progress-bar">
+                    <div
+                      [class]="(game.achievementPercentage ?? 0) === 100 ? 'progress-fill-gold' : 'progress-fill'"
+                      [style.width.%]="game.achievementPercentage ?? 0"
+                    ></div>
+                  </div>
+                } @else {
+                  <div class="text-steam-muted text-xs mb-3 italic">No achievements</div>
+                }
 
                 <!-- Footer -->
                 <div class="flex items-center justify-between mt-3 pt-3 border-t border-steam-border/50">
@@ -192,13 +194,43 @@ type SortOption = 'name' | 'completion' | 'playtime' | 'unlocked';
               </a>
             }
           </div>
+
+          <!-- Pagination -->
+          @if (totalPages() > 1) {
+            <div class="flex items-center justify-between mt-8 pt-6 border-t border-steam-border">
+              <span class="text-steam-muted text-sm">
+                Page {{ currentPage() + 1 }} of {{ totalPages() }}
+                &nbsp;·&nbsp; {{ filteredGames().length }} games
+              </span>
+              <div class="flex gap-2">
+                <button
+                  (click)="prevPage()"
+                  [disabled]="currentPage() === 0"
+                  class="px-4 py-2 rounded-lg bg-steam-card border border-steam-border text-sm font-medium
+                         disabled:opacity-40 disabled:cursor-not-allowed
+                         hover:border-steam-accent hover:text-steam-text-bright transition-all"
+                >
+                  ← Prev
+                </button>
+                <button
+                  (click)="nextPage()"
+                  [disabled]="currentPage() >= totalPages() - 1"
+                  class="px-4 py-2 rounded-lg bg-steam-card border border-steam-border text-sm font-medium
+                         disabled:opacity-40 disabled:cursor-not-allowed
+                         hover:border-steam-accent hover:text-steam-text-bright transition-all"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          }
         }
 
       </main>
     </div>
   `,
 })
-export class GamesComponent implements OnInit {
+export class GamesComponent implements OnInit, OnDestroy {
   private steamService = inject(SteamService);
   private router = inject(Router);
   private http = inject(HttpClient);
@@ -208,6 +240,9 @@ export class GamesComponent implements OnInit {
   searchQuery = signal('');
   sortBy = signal<SortOption>('name');
   showOnlyCompleted = signal(false);
+  currentPage = signal(0);
+
+  private readonly PAGE_SIZE = 100;
 
   filteredGames = computed(() => {
     let list = [...this.games()];
@@ -240,6 +275,14 @@ export class GamesComponent implements OnInit {
     return list;
   });
 
+  totalPages = computed(() => Math.ceil(this.filteredGames().length / this.PAGE_SIZE));
+
+  paginatedGames = computed(() => {
+    const page = Math.min(this.currentPage(), Math.max(0, this.totalPages() - 1));
+    const start = page * this.PAGE_SIZE;
+    return this.filteredGames().slice(start, start + this.PAGE_SIZE);
+  });
+
   private gameGradients: Record<number, string> = {
     220: 'bg-gradient-to-br from-orange-600 to-red-700',
     620: 'bg-gradient-to-br from-blue-500 to-indigo-700',
@@ -254,10 +297,33 @@ export class GamesComponent implements OnInit {
       return;
     }
 
-    this.steamService.getOwnedGames(steamId).subscribe((games) => {
+    // Load basic game list first (1 Steam API call) so the page renders immediately,
+    // then fetch achievement stats for all games in the background.
+    this.steamService.getBasicGames(steamId).subscribe((games) => {
       this.games.set(games);
       this.loading.set(false);
+
+      // Fetch full stats in background; update games signal when ready.
+      this.steamService.getOwnedGames(steamId).subscribe((gamesWithStats) => {
+        this.games.set(gamesWithStats);
+      });
     });
+  }
+
+  ngOnDestroy(): void {}
+
+  prevPage(): void {
+    this.currentPage.update((p) => Math.max(0, p - 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  nextPage(): void {
+    this.currentPage.update((p) => Math.min(this.totalPages() - 1, p + 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  resetPage(): void {
+    this.currentPage.set(0);
   }
 
   getGameGradient(appId: number): string {
@@ -303,5 +369,6 @@ export class GamesComponent implements OnInit {
   clearFilters(): void {
     this.searchQuery.set('');
     this.showOnlyCompleted.set(false);
+    this.currentPage.set(0);
   }
 }

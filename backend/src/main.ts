@@ -12,7 +12,12 @@ async function bootstrap() {
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const isDev = process.env.NODE_ENV !== 'production';
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: isDev
+      ? ['error', 'warn', 'log', 'debug', 'verbose']
+      : ['error', 'warn'],
+  });
 
   // Security
   app.use((helmet as any).default ? (helmet as any).default() : (helmet as any)());

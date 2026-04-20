@@ -24,7 +24,7 @@ import { join } from 'path';
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 100,
+        limit: 500,
       },
     ]),
     SteamModule,

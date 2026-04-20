@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
@@ -212,7 +212,7 @@ import { SteamService } from '../../services/steam.service';
     </div>
   `,
 })
-export class LoginComponent {
+export class LoginComponent{
   private steamService = inject(SteamService);
   private router = inject(Router);
 

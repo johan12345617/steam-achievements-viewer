@@ -84,6 +84,7 @@ export interface DashboardStats {
   unlockedAchievements: number;
   unlockRate: number;
   rarestAchievement: Achievement | null;
+  rarestAchievementGame: OwnedGame | null;
   recentUnlocks: RecentUnlock[];
 }
 

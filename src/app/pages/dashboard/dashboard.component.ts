@@ -132,6 +132,7 @@ import { HttpClient } from '@angular/common/http';
                   <span class="text-lg text-steam-muted font-normal">/ {{ stats()!.totalAchievements }}</span>
                 </div>
                 <div class="text-steam-muted text-sm">Achievements</div>
+                <div class="text-steam-muted/50 text-xs mt-0.5">Recent games</div>
               </div>
 
               <!-- Unlock Rate -->
@@ -148,6 +149,7 @@ import { HttpClient } from '@angular/common/http';
                   {{ stats()!.unlockRate }}<span class="text-lg text-steam-muted font-normal">%</span>
                 </div>
                 <div class="text-steam-muted text-sm">Unlock Rate</div>
+                <div class="text-steam-muted/50 text-xs mt-0.5">Recent games</div>
                 <!-- Mini progress bar -->
                 <div class="progress-bar mt-3">
                   <div class="progress-fill" [style.width.%]="stats()!.unlockRate"></div>
@@ -165,9 +167,17 @@ import { HttpClient } from '@angular/common/http';
                   <span class="text-xs text-purple-400/80 bg-purple-500/10 border border-purple-500/20 px-2 py-1 rounded-lg">Rarest</span>
                 </div>
                 @if (stats()!.rarestAchievement) {
-                  <div class="text-sm font-bold text-steam-text-bright mb-1 truncate">
+                  <div class="text-sm font-bold text-steam-text-bright mb-0.5 truncate">
                     {{ stats()!.rarestAchievement!.name }}
                   </div>
+                  @if (stats()!.rarestAchievementGame) {
+                    <a
+                      [routerLink]="['/games', stats()!.rarestAchievementGame!.appId]"
+                      class="text-steam-accent text-xs truncate mb-1 block hover:text-steam-accent-hover hover:underline transition-colors"
+                    >
+                      {{ stats()!.rarestAchievementGame!.name }}
+                    </a>
+                  }
                   <div class="text-steam-muted text-xs">
                     Only <span class="text-purple-400 font-semibold">{{ stats()!.rarestAchievement!.globalPercentage }}%</span> of players
                   </div>
@@ -231,9 +241,13 @@ import { HttpClient } from '@angular/common/http';
                             {{ unlock.achievement.description }}
                           </p>
                           <div class="flex items-center gap-3 mt-1.5">
-                            <span class="text-steam-accent text-xs font-medium">
+                            <a
+                              [routerLink]="['/games', unlock.game.appId]"
+                              class="text-steam-accent text-xs font-medium hover:text-steam-accent-hover hover:underline transition-colors"
+                              (click)="$event.stopPropagation()"
+                            >
                               {{ unlock.game.name }}
-                            </span>
+                            </a>
                             @if (unlock.achievement.globalPercentage) {
                               <span class="text-steam-muted text-xs">
                                 {{ unlock.achievement.globalPercentage }}% global
@@ -273,7 +287,7 @@ import { HttpClient } from '@angular/common/http';
               <!-- Game overview sidebar -->
               <div>
                 <div class="flex items-center justify-between mb-4">
-                  <h2 class="text-lg font-bold text-steam-text-bright">Your Games</h2>
+                  <h2 class="text-lg font-bold text-steam-text-bright">Latest games with achivements</h2>
                   <a routerLink="/games" class="text-steam-accent text-sm hover:text-steam-accent-hover transition-colors">
                     All →
                   </a>
@@ -300,15 +314,19 @@ import { HttpClient } from '@angular/common/http';
                         <p class="text-steam-text font-medium text-sm truncate group-hover:text-steam-text-bright transition-colors">
                           {{ game.name }}
                         </p>
-                        <div class="progress-bar mt-1.5">
-                          <div
-                            [class]="(game.achievementPercentage ?? 0) === 100 ? 'progress-fill-gold' : 'progress-fill'"
-                            [style.width.%]="game.achievementPercentage ?? 0"
-                          ></div>
-                        </div>
-                        <p class="text-steam-muted text-xs mt-1">
-                          {{ game.achievementsUnlocked }}/{{ game.achievementsTotal }} ({{ game.achievementPercentage }}%)
-                        </p>
+                        @if ((game.achievementsTotal ?? 0) > 0) {
+                          <div class="progress-bar mt-1.5">
+                            <div
+                              [class]="(game.achievementPercentage ?? 0) === 100 ? 'progress-fill-gold' : 'progress-fill'"
+                              [style.width.%]="game.achievementPercentage ?? 0"
+                            ></div>
+                          </div>
+                          <p class="text-steam-muted text-xs mt-1">
+                            {{ game.achievementsUnlocked }}/{{ game.achievementsTotal }} ({{ game.achievementPercentage }}%)
+                          </p>
+                        } @else {
+                          <p class="text-steam-muted text-xs mt-1.5 italic">No achievements</p>
+                        }
                       </div>
                     </a>
                   }
@@ -343,16 +361,10 @@ export class DashboardComponent implements OnInit {
 
     this.steamService.getPlayerSummary(steamId).subscribe((p) => this.player.set(p));
 
-    this.steamService.getDashboardStats(steamId).subscribe((s) => {
-      this.stats.set(s);
-    });
-
-    this.steamService.getOwnedGames(steamId).subscribe((games) => {
-      // Sort by last played descending, show top 6
-      const sorted = [...games]
-        .sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))
-        .slice(0, 6);
-      this.topGames.set(sorted);
+    // Single fast call: fetches basic game list + achievements for top 10 recent games only
+    this.steamService.getDashboardData(steamId).subscribe(({ stats, topGames }) => {
+      this.stats.set(stats);
+      this.topGames.set(topGames);
       this.loading.set(false);
     });
   }
@@ -384,6 +396,7 @@ export class DashboardComponent implements OnInit {
   }
 
   formatDate(date: Date): string {
+    if (!date || date.getTime() < 1000) return 'Date unknown';
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -392,7 +405,10 @@ export class DashboardComponent implements OnInit {
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays}d ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (date.getFullYear() === now.getFullYear()) {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    return String(date.getFullYear());
   }
   onIconError(event: Event): void {
     (event.target as HTMLImageElement).style.display = 'none';

@@ -36,6 +36,15 @@ export class SteamController {
   }
 
   /**
+   * GET /api/steam/dashboard/:steamId
+   * Fast dashboard summary: basic game list + achievements for top 10 recent games only.
+   */
+  @Get('dashboard/:steamId')
+  async getDashboardData(@Param('steamId') steamId: string) {
+    return this.steamService.getDashboardData(steamId);
+  }
+
+  /**
    * GET /api/steam/achievements/:appId/:steamId
    * Returns merged achievement data: player progress + schema + global percentages
    */
