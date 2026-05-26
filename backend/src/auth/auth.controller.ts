@@ -1,7 +1,14 @@
-import { Controller, Get, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import {
+  clearSteamSessionCookie,
+  createSteamSessionCookie,
+  readSteamSession,
+  setSteamSessionCookie,
+  SteamSessionUser,
+} from './steam-session';
 
 @Controller('auth')
 export class AuthController {
@@ -25,7 +32,7 @@ export class AuthController {
   @Get('steam/callback')
   @UseGuards(AuthGuard('steam'))
   steamCallback(@Req() req: Request, @Res() res: Response) {
-    const user = req.user as { steamId: string; displayName: string; avatar: string } | undefined;
+    const user = req.user as SteamSessionUser | undefined;
 
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
 
@@ -33,6 +40,35 @@ export class AuthController {
       return res.redirect(`${frontendUrl}/?error=auth_failed`);
     }
 
-    return res.redirect(`${frontendUrl}/dashboard?steamId=${user.steamId}`);
+    const token = createSteamSessionCookie(user, this.sessionSecret);
+    setSteamSessionCookie(res, token, this.isProduction);
+    return res.redirect(`${frontendUrl}/dashboard`);
+  }
+
+  @Get('me')
+  getSession(@Req() req: Request): SteamSessionUser {
+    const user = readSteamSession(req, this.sessionSecret);
+    if (!user) {
+      throw new UnauthorizedException('No active Steam session.');
+    }
+    return user;
+  }
+
+  @Post('logout')
+  logout(@Res() res: Response) {
+    clearSteamSessionCookie(res, this.isProduction);
+    return res.json({ ok: true });
+  }
+
+  private get sessionSecret(): string {
+    const secret = this.configService.get<string>('AUTH_COOKIE_SECRET');
+    if (!secret && this.isProduction) {
+      throw new Error('AUTH_COOKIE_SECRET must be set in production.');
+    }
+    return secret || 'local-dev-change-me';
+  }
+
+  private get isProduction(): boolean {
+    return this.configService.get<string>('NODE_ENV') === 'production';
   }
 }

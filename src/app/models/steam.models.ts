@@ -58,11 +58,18 @@ export interface Achievement {
 export interface AchievementMedia {
   id: string;
   achievementApiName: string;
+  ownerSteamId?: string;
   appId: number;
   type: 'image' | 'video';
   url: string;
   thumbnailUrl?: string;
   caption?: string;
+  filename?: string;
+  objectKey?: string;
+  recordKey?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  status?: 'pending' | 'ready';
   uploadedAt: Date;
 }
 
@@ -100,4 +107,11 @@ export interface MediaUploadPayload {
   file: File;
   type: 'image' | 'video';
   caption?: string;
+}
+
+export interface MediaUploadTicket {
+  media: AchievementMedia;
+  uploadUrl: string;
+  headers: Record<string, string>;
+  expiresInSeconds: number;
 }

@@ -138,19 +138,19 @@ import { SteamService } from '../../services/steam.service';
                 <div class="flex-1 h-px bg-steam-border"></div>
               </div>
 
-              <!-- Steam OpenID (future) -->
+              <!-- Steam OpenID -->
               <div class="relative">
                 <button
-                  class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-steam-darker border border-steam-border rounded-lg text-steam-muted text-sm font-medium cursor-not-allowed opacity-60 select-none"
-                  title="Coming soon — requires backend setup"
+                  class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-steam-darker border border-steam-border rounded-lg text-steam-text text-sm font-medium hover:border-steam-accent/50 hover:text-steam-accent transition-all duration-200"
+                  title="Use Steam OpenID for private media ownership"
                   type="button"
-                  (click)="showOpenIdInfo.set(!showOpenIdInfo())"
+                  (click)="loginWithSteam()"
                 >
                   <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.718L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.624 0 11.979-5.355 11.979-11.979 0-6.623-5.354-11.979-11.979-11.979-.001-.001-.001 0 0 0z"/>
                   </svg>
                   Sign in with Steam
-                  <span class="ml-auto text-xs bg-steam-border px-2 py-0.5 rounded-full">Coming Soon</span>
+                  <span class="ml-auto text-xs bg-steam-accent/10 text-steam-accent px-2 py-0.5 rounded-full">Required for media</span>
                 </button>
 
                 @if (showOpenIdInfo()) {
@@ -212,7 +212,7 @@ import { SteamService } from '../../services/steam.service';
     </div>
   `,
 })
-export class LoginComponent{
+export class LoginComponent implements OnInit {
   private steamService = inject(SteamService);
   private router = inject(Router);
 
@@ -220,6 +220,14 @@ export class LoginComponent{
   loading = signal(false);
   errorMsg = signal('');
   showOpenIdInfo = signal(false);
+
+  ngOnInit(): void {
+    this.steamService.restoreSession().subscribe((authenticated) => {
+      if (authenticated) {
+        this.router.navigate(['/dashboard']);
+      }
+    });
+  }
 
   onSubmit(): void {
     const id = this.steamIdInput.trim();
@@ -249,5 +257,9 @@ export class LoginComponent{
         this.errorMsg.set('Could not load Steam profile. Please try again.');
       },
     });
+  }
+
+  loginWithSteam(): void {
+    this.steamService.loginWithSteam();
   }
 }

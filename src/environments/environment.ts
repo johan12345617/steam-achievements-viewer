@@ -1,5 +1,5 @@
 export const environment = {
   production: true,
   offlineMode: false,
-  apiBase: '/api',
+  apiBase: 'https://steam-achievements-viewer.onrender.com/api',
 };

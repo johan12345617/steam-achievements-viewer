@@ -102,18 +102,9 @@ export class NavbarComponent {
   playerName = this.steamService.currentPlayerName;
   player = this.steamService.currentPlayerInfo;
   logout(): void {
-    this.steamService.currentSteamId.set('');
-    this.steamService.currentPlayerName.set('');
-    this.steamService.currentPlayerInfo.set({
-      steamId: "",
-      personaName: "",
-      profileUrl: "",
-      avatarUrl: "",
-      avatarMediumUrl: "",
-      avatarFullUrl: "",
-      personaState: 0
+    this.steamService.logout().subscribe({
+      next: () => this.router.navigate(['/login']),
     });
-    this.router.navigate(['/login']);
   }
   onAvatarError(event: Event): void {
     const img = event.target as HTMLImageElement;

@@ -1,20 +1,21 @@
 import {
-  Controller,
-  Post,
-  Get,
-  Delete,
-  Param,
-  Query,
-  Body,
-  UploadedFile,
-  UseInterceptors,
   BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
   ParseIntPipe,
+  Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage, memoryStorage } from 'multer';
-import { MediaService } from './media.service';
+import { Request } from 'express';
+import { MediaService, MediaUploadTicket } from './media.service';
 import { MediaEntity } from './entities/media.entity';
+import { SteamSessionGuard } from '../auth/steam-session.guard';
+import { SteamSessionUser } from '../auth/steam-session';
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -23,95 +24,94 @@ const ALLOWED_MIME_TYPES = [
   'image/webp',
   'video/mp4',
   'video/webm',
+  'video/quicktime',
 ];
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
+interface CreateUploadTicketBody {
+  appId: number | string;
+  type: 'image' | 'video';
+  caption?: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number | string;
+}
+
+@UseGuards(SteamSessionGuard)
 @Controller('media')
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
 
-  /**
-   * POST /api/media/upload/:achievementApiName
-   * Multipart form-data: file, appId, type, caption (optional)
-   */
-  @Post('upload/:achievementApiName')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (req, file, cb) => {
-          const path = require('path');
-          const fs = require('fs');
-          const uploadsDir = path.join(process.cwd(), 'uploads');
-          if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-          }
-          cb(null, uploadsDir);
-        },
-        filename: (req, file, cb) => {
-          // Use a temp name; the service will rename it with the final UUID
-          const { v4: uuidv4 } = require('uuid');
-          const path = require('path');
-          const ext = path.extname(file.originalname).toLowerCase();
-          cb(null, `tmp-${uuidv4()}${ext}`);
-        },
-      }),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (req, file, cb) => {
-        if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-          cb(
-            new BadRequestException(
-              `File type "${file.mimetype}" is not allowed. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`,
-            ),
-            false,
-          );
-          return;
-        }
-        cb(null, true);
-      },
-    }),
-  )
-  async uploadMedia(
+  @Post('upload-url/:achievementApiName')
+  async createUploadTicket(
+    @Req() req: Request,
     @Param('achievementApiName') achievementApiName: string,
-    @UploadedFile() file: Express.Multer.File,
-    @Body('appId') appIdStr: string,
-    @Body('type') type: string,
-    @Body('caption') caption?: string,
-  ): Promise<MediaEntity> {
-    if (!file) {
-      throw new BadRequestException('No file provided');
-    }
+    @Body() body: CreateUploadTicketBody,
+  ): Promise<MediaUploadTicket> {
+    const appId = Number(body.appId);
+    const sizeBytes = Number(body.sizeBytes);
+    const type = body.type;
 
-    const appId = parseInt(appIdStr, 10);
-    if (isNaN(appId)) {
-      throw new BadRequestException('appId must be a valid number');
+    if (!Number.isInteger(appId) || appId <= 0) {
+      throw new BadRequestException('appId must be a valid positive number');
     }
-
     if (type !== 'image' && type !== 'video') {
       throw new BadRequestException('type must be "image" or "video"');
     }
+    if (!body.fileName?.trim()) {
+      throw new BadRequestException('fileName is required');
+    }
+    if (!ALLOWED_MIME_TYPES.includes(body.contentType)) {
+      throw new BadRequestException(`File type "${body.contentType}" is not allowed`);
+    }
+    if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+      throw new BadRequestException('sizeBytes must be a valid positive number');
+    }
 
-    return this.mediaService.upload(achievementApiName, appId, type as 'image' | 'video', file, caption);
+    const maxSize = type === 'image' ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
+    if (sizeBytes > maxSize) {
+      throw new BadRequestException(`File too large. Maximum size is ${Math.floor(maxSize / 1024 / 1024)}MB.`);
+    }
+    if (type === 'image' && !body.contentType.startsWith('image/')) {
+      throw new BadRequestException('Selected media type does not match the file content type');
+    }
+    if (type === 'video' && !body.contentType.startsWith('video/')) {
+      throw new BadRequestException('Selected media type does not match the file content type');
+    }
+
+    return this.mediaService.createUploadTicket({
+      ownerSteamId: this.user(req).steamId,
+      achievementApiName,
+      appId,
+      type,
+      fileName: body.fileName,
+      contentType: body.contentType,
+      sizeBytes,
+      caption: body.caption?.slice(0, 200),
+    });
   }
 
-  /**
-   * GET /api/media/game/:appId
-   * Returns all media for a given game
-   * NOTE: This route must be declared before /:achievementApiName to avoid route conflicts
-   */
+  @Post('complete/:mediaId')
+  async completeUpload(
+    @Req() req: Request,
+    @Param('mediaId') mediaId: string,
+  ): Promise<MediaEntity> {
+    return this.mediaService.completeUpload(this.user(req).steamId, mediaId);
+  }
+
   @Get('game/:appId')
   async getMediaByGame(
+    @Req() req: Request,
     @Param('appId', ParseIntPipe) appId: number,
   ): Promise<MediaEntity[]> {
-    return this.mediaService.findByGame(appId);
+    return this.mediaService.findByGame(this.user(req).steamId, appId);
   }
 
-  /**
-   * GET /api/media/:achievementApiName?appId=123
-   * Returns all media for a specific achievement
-   */
   @Get(':achievementApiName')
   async getMediaByAchievement(
+    @Req() req: Request,
     @Param('achievementApiName') achievementApiName: string,
     @Query('appId') appIdStr: string,
   ): Promise<MediaEntity[]> {
@@ -119,17 +119,18 @@ export class MediaController {
     if (isNaN(appId)) {
       throw new BadRequestException('appId query parameter must be a valid number');
     }
-    return this.mediaService.findByAchievement(achievementApiName, appId);
+    return this.mediaService.findByAchievement(this.user(req).steamId, achievementApiName, appId);
   }
 
-  /**
-   * DELETE /api/media/:mediaId
-   * Deletes a media item from disk and the database
-   */
   @Delete(':mediaId')
   async deleteMedia(
+    @Req() req: Request,
     @Param('mediaId') mediaId: string,
   ): Promise<{ deleted: boolean }> {
-    return this.mediaService.delete(mediaId);
+    return this.mediaService.delete(this.user(req).steamId, mediaId);
+  }
+
+  private user(req: Request): SteamSessionUser {
+    return req.user as SteamSessionUser;
   }
 }

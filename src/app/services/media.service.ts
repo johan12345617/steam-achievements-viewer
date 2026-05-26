@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, delay, throwError, map } from 'rxjs';
-import { AchievementMedia, MediaUploadPayload } from '../models/steam.models';
+import { Observable, of, delay, throwError, map, switchMap, catchError } from 'rxjs';
+import { AchievementMedia, MediaUploadPayload, MediaUploadTicket } from '../models/steam.models';
 import { environment } from '../../environments/environment';
 
 @Injectable({
@@ -46,13 +46,13 @@ export class MediaService {
   ]);
 
   uploadAchievementMedia(payload: MediaUploadPayload): Observable<AchievementMedia> {
-    const maxSize = 100 * 1024 * 1024;
+    const maxSize = payload.type === 'image' ? 10 * 1024 * 1024 : 100 * 1024 * 1024;
     if (payload.file.size > maxSize) {
-      return throwError(() => new Error('File too large. Maximum size is 100MB.'));
+      return throwError(() => new Error(`File too large. Maximum size is ${payload.type === 'image' ? '10MB' : '100MB'}.`));
     }
 
     const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const allowedVideoTypes = ['video/mp4', 'video/webm', 'video/mov'];
+    const allowedVideoTypes = ['video/mp4', 'video/webm', 'video/quicktime'];
     const allowedTypes = payload.type === 'image' ? allowedImageTypes : allowedVideoTypes;
     if (!allowedTypes.includes(payload.file.type)) {
       return throwError(() => new Error(`Invalid file type. Allowed: ${allowedTypes.join(', ')}`));
@@ -75,14 +75,32 @@ export class MediaService {
       return of(newMedia).pipe(delay(1200));
     }
 
-    const formData = new FormData();
-    formData.append('file', payload.file);
-    formData.append('type', payload.type);
-    formData.append('appId', String(payload.appId));
-    if (payload.caption) formData.append('caption', payload.caption);
-    return this.http.post<AchievementMedia>(
-      `${this.api}/media/upload/${payload.achievementApiName}`,
-      formData,
+    return this.http.post<MediaUploadTicket>(
+      `${this.api}/media/upload-url/${payload.achievementApiName}`,
+      {
+        appId: payload.appId,
+        type: payload.type,
+        caption: payload.caption,
+        fileName: payload.file.name,
+        contentType: payload.file.type,
+        sizeBytes: payload.file.size,
+      },
+      { withCredentials: true },
+    ).pipe(
+      switchMap((ticket) =>
+        this.http.put(ticket.uploadUrl, payload.file, {
+          headers: ticket.headers,
+          responseType: 'text',
+        }).pipe(map(() => ticket.media.id)),
+      ),
+      switchMap((mediaId) =>
+        this.http.post<AchievementMedia>(
+          `${this.api}/media/complete/${mediaId}`,
+          {},
+          { withCredentials: true },
+        ),
+      ),
+      catchError((err) => throwError(() => new Error(this.errorMessage(err)))),
     );
   }
 
@@ -92,6 +110,7 @@ export class MediaService {
     }
     return this.http.get<AchievementMedia[]>(
       `${this.api}/media/${achievementApiName}?appId=${appId}`,
+      { withCredentials: true },
     );
   }
 
@@ -101,7 +120,7 @@ export class MediaService {
       this.mockMediaStore.set(achievementApiName, existing.filter((m) => m.id !== mediaId));
       return of(undefined).pipe(delay(400));
     }
-    return this.http.delete<void>(`${this.api}/media/${mediaId}`).pipe(map(() => undefined));
+    return this.http.delete<void>(`${this.api}/media/${mediaId}`, { withCredentials: true }).pipe(map(() => undefined));
   }
 
   getGameMedia(appId: number): Observable<AchievementMedia[]> {
@@ -110,6 +129,17 @@ export class MediaService {
       this.mockMediaStore.forEach((list) => allMedia.push(...list.filter((m) => m.appId === appId)));
       return of(allMedia).pipe(delay(400));
     }
-    return this.http.get<AchievementMedia[]>(`${this.api}/media/game/${appId}`);
+    return this.http.get<AchievementMedia[]>(`${this.api}/media/game/${appId}`, { withCredentials: true });
+  }
+
+  private errorMessage(err: any): string {
+    const message = err?.error?.message ?? err?.message;
+    if (Array.isArray(message)) {
+      return message.join(', ');
+    }
+    if (typeof message === 'string') {
+      return message;
+    }
+    return 'Upload failed. Please try again.';
   }
 }

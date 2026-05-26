@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, delay, map, forkJoin, switchMap, catchError, tap, shareReplay } from 'rxjs';
+import { Observable, of, delay, map, forkJoin, catchError, tap, shareReplay } from 'rxjs';
 import {
   PlayerSummary,
   OwnedGame,
@@ -66,6 +66,12 @@ interface BackendDashboardResponse {
   rarestAchievementGame: BackendGame | null;
 }
 
+interface BackendSessionUser {
+  steamId: string;
+  displayName: string;
+  avatar: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -88,6 +94,7 @@ export class SteamService {
   // Request-level cache: avoids duplicate HTTP calls when multiple components load the same data
   private readonly ownedGamesCache = new Map<string, Observable<OwnedGame[]>>();
   private readonly basicGamesCache = new Map<string, Observable<OwnedGame[]>>();
+  private restoreSessionRequest?: Observable<boolean>;
 
   // ============================================================
   // MOCK DATA
@@ -471,6 +478,62 @@ export class SteamService {
     return this.http.get<BackendPlayer>(`${this.api}/steam/player/${steamId}`).pipe(
       map((p) => this.mapPlayer(p, steamId)),
       tap((player) => this.currentPlayerInfo.set(player)) // cache it
+    );
+  }
+
+  loginWithSteam(): void {
+    window.location.href = `${this.api}/auth/steam`;
+  }
+
+  restoreSession(): Observable<boolean> {
+    if (this.currentSteamId()) {
+      return of(true);
+    }
+
+    if (!this.restoreSessionRequest) {
+      this.restoreSessionRequest = this.http.get<BackendSessionUser>(`${this.api}/auth/me`, { withCredentials: true }).pipe(
+        tap((user) => {
+          this.currentSteamId.set(user.steamId);
+          this.currentPlayerName.set(user.displayName);
+          this.currentPlayerInfo.set({
+            steamId: user.steamId,
+            personaName: user.displayName,
+            profileUrl: `https://steamcommunity.com/profiles/${user.steamId}`,
+            avatarUrl: user.avatar,
+            avatarMediumUrl: user.avatar,
+            avatarFullUrl: user.avatar,
+            personaState: 0,
+          });
+        }),
+        map(() => true),
+        catchError(() => of(false)),
+        shareReplay(1),
+      );
+    }
+
+    return this.restoreSessionRequest;
+  }
+
+  logout(): Observable<void> {
+    const steamId = this.currentSteamId();
+    if (steamId) {
+      this.clearCache(steamId);
+    }
+    this.currentSteamId.set('');
+    this.currentPlayerName.set('');
+    this.currentPlayerInfo.set({
+      steamId: '',
+      personaName: '',
+      profileUrl: '',
+      avatarUrl: '',
+      avatarMediumUrl: '',
+      avatarFullUrl: '',
+      personaState: 0,
+    });
+    this.restoreSessionRequest = undefined;
+    return this.http.post<{ ok: boolean }>(`${this.api}/auth/logout`, {}, { withCredentials: true }).pipe(
+      map(() => undefined),
+      catchError(() => of(undefined)),
     );
   }
 

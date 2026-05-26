@@ -2,14 +2,16 @@ import { Routes } from '@angular/router';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { SteamService } from './services/steam.service';
+import { map } from 'rxjs';
 
 // Auth guard: redirect to /login if no Steam ID in session
-export function authGuard(): boolean {
+export function authGuard() {
   const steamService = inject(SteamService);
   const router = inject(Router);
   if (!steamService.currentSteamId()) {
-    router.navigate(['/login']);
-    return false;
+    return steamService.restoreSession().pipe(
+      map((authenticated) => authenticated ? true : router.createUrlTree(['/login'])),
+    );
   }
   return true;
 }

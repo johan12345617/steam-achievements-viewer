@@ -11,6 +11,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MediaService } from '../../services/media.service';
 import { Achievement, AchievementMedia } from '../../models/steam.models';
+import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-upload-modal',
@@ -64,6 +65,9 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
                     d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
                 Image
+                @if (selectedImageFile()) {
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                }
               </span>
             </button>
             <button
@@ -78,6 +82,9 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
                     d="M15 10l4.553-2.069A1 1 0 0121 8.845v6.31a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
                 Video
+                @if (selectedVideoFile()) {
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                }
               </span>
             </button>
           </div>
@@ -101,18 +108,18 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
               (change)="onFileSelected($event)"
             />
 
-            @if (previewUrl()) {
+            @if (currentPreviewUrl()) {
               <!-- Preview -->
               <div class="relative rounded-xl overflow-hidden">
                 @if (selectedType() === 'image') {
                   <img
-                    [src]="previewUrl()"
+                    [src]="currentPreviewUrl()"
                     alt="Preview"
                     class="w-full h-48 object-cover rounded-xl"
                   />
                 } @else {
                   <video
-                    [src]="previewUrl()"
+                    [src]="currentPreviewUrl()"
                     class="w-full h-48 object-cover rounded-xl"
                     controls
                   ></video>
@@ -143,6 +150,51 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
             }
           </div>
 
+          @if (selectedImageFile() || selectedVideoFile()) {
+            <div class="grid grid-cols-2 gap-3">
+              <div class="rounded-lg border border-steam-border bg-steam-darker p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-wider text-steam-teal">Image</span>
+                  @if (selectedImageFile()) {
+                    <button
+                      type="button"
+                      (click)="clearPending('image')"
+                      class="text-steam-muted hover:text-red-400 transition-colors"
+                      title="Remove image"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  }
+                </div>
+                <p class="text-xs text-steam-muted truncate mt-1">
+                  {{ selectedImageFile()?.name || 'Not selected' }}
+                </p>
+              </div>
+              <div class="rounded-lg border border-steam-border bg-steam-darker p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-wider text-purple-300">Video</span>
+                  @if (selectedVideoFile()) {
+                    <button
+                      type="button"
+                      (click)="clearPending('video')"
+                      class="text-steam-muted hover:text-red-400 transition-colors"
+                      title="Remove video"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  }
+                </div>
+                <p class="text-xs text-steam-muted truncate mt-1">
+                  {{ selectedVideoFile()?.name || 'Not selected' }}
+                </p>
+              </div>
+            </div>
+          }
+
           <!-- Error message -->
           @if (errorMessage()) {
             <div class="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
@@ -153,20 +205,6 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
               {{ errorMessage() }}
             </div>
           }
-
-          <!-- Caption field -->
-          <div>
-            <label class="block text-steam-text text-sm font-medium mb-2">
-              Caption <span class="text-steam-muted font-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              [(ngModel)]="caption"
-              placeholder="Add a caption to your media..."
-              class="input-steam"
-              maxlength="200"
-            />
-          </div>
 
           <!-- Existing media -->
           @if (existingMedia().length > 0) {
@@ -213,9 +251,9 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
           <button
             (click)="onUpload()"
             class="btn-primary text-sm min-w-[120px]"
-            [disabled]="!selectedFile() || uploading()"
-            [class.opacity-50]="!selectedFile() || uploading()"
-            [class.cursor-not-allowed]="!selectedFile() || uploading()"
+            [disabled]="!hasPendingUploads() || uploading()"
+            [class.opacity-50]="!hasPendingUploads() || uploading()"
+            [class.cursor-not-allowed]="!hasPendingUploads() || uploading()"
           >
             @if (uploading()) {
               <span class="flex items-center gap-2 justify-center">
@@ -226,7 +264,7 @@ import { Achievement, AchievementMedia } from '../../models/steam.models';
                 Uploading...
               </span>
             } @else {
-              Upload
+              Upload {{ uploadCount() }} {{ uploadCount() === 1 ? 'file' : 'files' }}
             }
           </button>
         </div>
@@ -244,13 +282,21 @@ export class UploadModalComponent {
   private mediaService = inject(MediaService);
 
   selectedType = signal<'image' | 'video'>('image');
-  selectedFile = signal<File | null>(null);
-  previewUrl = signal<string | null>(null);
-  caption = '';
+  selectedImageFile = signal<File | null>(null);
+  selectedVideoFile = signal<File | null>(null);
+  imagePreviewUrl = signal<string | null>(null);
+  videoPreviewUrl = signal<string | null>(null);
   uploading = signal(false);
   errorMessage = signal('');
   dragOver = signal(false);
   existingMedia = signal<AchievementMedia[]>([]);
+  currentPreviewUrl = computed(() =>
+    this.selectedType() === 'image' ? this.imagePreviewUrl() : this.videoPreviewUrl()
+  );
+  uploadCount = computed(() =>
+    (this.selectedImageFile() ? 1 : 0) + (this.selectedVideoFile() ? 1 : 0)
+  );
+  hasPendingUploads = computed(() => this.uploadCount() > 0);
 
   acceptTypes = computed(() =>
     this.selectedType() === 'image'
@@ -292,47 +338,70 @@ export class UploadModalComponent {
   processFile(file: File): void {
     this.errorMessage.set('');
 
-    // Auto-detect type
+    let mediaType = this.selectedType();
     if (file.type.startsWith('image/')) {
-      this.selectedType.set('image');
+      mediaType = 'image';
     } else if (file.type.startsWith('video/')) {
-      this.selectedType.set('video');
+      mediaType = 'video';
     }
 
-    this.selectedFile.set(file);
+    this.selectedType.set(mediaType);
+    if (mediaType === 'image') {
+      this.selectedImageFile.set(file);
+    } else {
+      this.selectedVideoFile.set(file);
+    }
 
-    // Generate preview URL
     const reader = new FileReader();
-    reader.onload = (e) => this.previewUrl.set(e.target?.result as string);
+    reader.onload = (e) => {
+      if (mediaType === 'image') {
+        this.imagePreviewUrl.set(e.target?.result as string);
+      } else {
+        this.videoPreviewUrl.set(e.target?.result as string);
+      }
+    };
     reader.readAsDataURL(file);
   }
 
+  clearPending(type: 'image' | 'video'): void {
+    if (type === 'image') {
+      this.selectedImageFile.set(null);
+      this.imagePreviewUrl.set(null);
+    } else {
+      this.selectedVideoFile.set(null);
+      this.videoPreviewUrl.set(null);
+    }
+  }
+
   onUpload(): void {
-    const file = this.selectedFile();
-    if (!file) return;
+    const uploads = [
+      { type: 'image' as const, file: this.selectedImageFile() },
+      { type: 'video' as const, file: this.selectedVideoFile() },
+    ].filter((item): item is { type: 'image' | 'video'; file: File } => Boolean(item.file));
+
+    if (uploads.length === 0) return;
 
     this.uploading.set(true);
     this.errorMessage.set('');
 
-    this.mediaService
-      .uploadAchievementMedia({
+    forkJoin(
+      uploads.map(({ type, file }) => this.mediaService.uploadAchievementMedia({
         achievementApiName: this.achievement.apiName,
         appId: this.appId,
         file,
-        type: this.selectedType(),
-        caption: this.caption || undefined,
-      })
-      .subscribe({
-        next: (media) => {
-          this.uploading.set(false);
-          this.uploaded.emit(media);
-          this.onClose();
-        },
-        error: (err: Error) => {
-          this.uploading.set(false);
-          this.errorMessage.set(err.message ?? 'Upload failed. Please try again.');
-        },
-      });
+        type,
+      })),
+    ).subscribe({
+      next: (mediaItems) => {
+        this.uploading.set(false);
+        mediaItems.forEach((media) => this.uploaded.emit(media));
+        this.onClose();
+      },
+      error: (err: Error) => {
+        this.uploading.set(false);
+        this.errorMessage.set(err.message ?? 'Upload failed. Please try again.');
+      },
+    });
   }
 
   deleteMedia(item: AchievementMedia): void {

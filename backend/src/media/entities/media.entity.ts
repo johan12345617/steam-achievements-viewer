@@ -13,6 +13,9 @@ export class MediaEntity {
   @Column({ type: 'varchar' })
   achievementApiName: string;
 
+  @Column({ type: 'varchar', default: '' })
+  ownerSteamId: string;
+
   @Column({ type: 'integer' })
   appId: number;
 
@@ -30,6 +33,21 @@ export class MediaEntity {
 
   @Column({ type: 'varchar' })
   filename: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  objectKey: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  recordKey: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  contentType: string | null;
+
+  @Column({ type: 'integer', default: 0 })
+  sizeBytes: number;
+
+  @Column({ type: 'varchar', default: 'ready' })
+  status: 'pending' | 'ready';
 
   @CreateDateColumn()
   uploadedAt: Date;

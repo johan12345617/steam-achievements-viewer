@@ -3,6 +3,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { SteamService } from '../../services/steam.service';
+import { MediaService } from '../../services/media.service';
 import { NavbarComponent } from '../../components/navbar/navbar.component';
 import { UploadModalComponent } from '../../components/upload-modal/upload-modal.component';
 import { MediaViewerComponent } from '../../components/media-viewer/media-viewer.component';
@@ -201,9 +202,10 @@ type FilterTab = 'all' | 'unlocked' | 'locked';
                 } @else {
                 <!-- Normal card (unlocked, non-hidden locked, or revealed) -->
                 <div
+                  (click)="onAchievementCardClick(achievement)"
                   class="card p-5 transition-all duration-200 group"
                   [class]="achievement.achieved
-                    ? 'card p-5 transition-all duration-200 group hover:border-yellow-500/30 hover:shadow-gold'
+                    ? 'card p-5 transition-all duration-200 group hover:border-yellow-500/30 hover:shadow-gold ' + (getAchievementMedia(achievement.apiName).length > 0 ? 'cursor-pointer' : '')
                     : 'card p-5 transition-all duration-200 group opacity-60'"
                 >
                   <div class="flex items-start gap-4">
@@ -317,55 +319,18 @@ type FilterTab = 'all' | 'unlocked' | 'locked';
                           }
                         </div>
 
-                        <!-- Add Media button -->
-                        @if (achievement.achieved) {
+                        @if (achievement.achieved && !hasCompleteMediaSet(achievement.apiName)) {
                           <button
-                            (click)="openUploadModal(achievement)"
+                            (click)="openUploadModal(achievement); $event.stopPropagation()"
                             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-steam-accent/10 hover:bg-steam-accent/20 border border-steam-accent/20 hover:border-steam-accent/40 text-steam-accent text-xs font-semibold transition-all duration-200"
                           >
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                             </svg>
-                            Add Media
+                            {{ getAchievementMedia(achievement.apiName).length > 0 ? 'Add Missing Media' : 'Add Media' }}
                           </button>
                         }
                       </div>
-
-                      <!-- Media thumbnails preview — click to open viewer -->
-                      @if (getAchievementMedia(achievement.apiName).length > 0) {
-                        <div class="flex gap-2 mt-3">
-                          @for (media of getAchievementMedia(achievement.apiName); track media.id; let i = $index) {
-                            <button
-                              (click)="openMediaViewer(achievement.apiName, i)"
-                              class="w-16 h-10 rounded-lg overflow-hidden border border-steam-border hover:border-steam-accent/60 flex-shrink-0 transition-all duration-200 hover:scale-105 hover:shadow-[0_0_8px_rgba(79,158,237,0.4)] relative group"
-                              title="{{ media.type === 'video' ? 'Play video' : 'View image' }}"
-                            >
-                              @if (media.type === 'image') {
-                                <img
-                                  [src]="media.thumbnailUrl ?? media.url"
-                                  [alt]="media.caption || 'Media'"
-                                  class="w-full h-full object-cover"
-                                />
-                              } @else {
-                                <div class="w-full h-full bg-steam-darker flex items-center justify-center">
-                                  <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                </div>
-                              }
-                              <!-- Hover overlay -->
-                              <div class="absolute inset-0 bg-steam-accent/0 group-hover:bg-steam-accent/10 transition-colors duration-200 flex items-center justify-center">
-                                <svg class="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                                </svg>
-                              </div>
-                            </button>
-                          }
-                        </div>
-                      }
 
                     </div>
                   </div>
@@ -420,6 +385,7 @@ export class GameDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private http = inject(HttpClient);
+  private mediaService = inject(MediaService);
 
   loading = signal(true);
   gameStats = signal<GameStats | null>(null);
@@ -501,10 +467,9 @@ export class GameDetailComponent implements OnInit {
         this.gameStats.set(stats);
         this.loading.set(false);
 
-        // Pre-load existing media for unlocked achievements
-        const unlockedNames = stats.achievements.filter((a) => a.achieved).map((a) => a.apiName);
-        unlockedNames.forEach((name) => {
-          // Mock: initial media is already in media service store
+        this.mediaService.getGameMedia(appIdParam).subscribe({
+          next: (media) => this.mediaStore.set(this.groupMediaByAchievement(media)),
+          error: () => this.mediaStore.set({}),
         });
       },
       error: () => {
@@ -561,12 +526,24 @@ export class GameDetailComponent implements OnInit {
     const existing = current[key] ?? [];
     this.mediaStore.set({
       ...current,
-      [key]: [...existing, media],
+      [key]: this.sortMediaForCarousel([...existing, media]),
     });
   }
 
   getAchievementMedia(apiName: string): AchievementMedia[] {
     return this.mediaStore()[apiName] ?? [];
+  }
+
+  hasCompleteMediaSet(apiName: string): boolean {
+    const media = this.getAchievementMedia(apiName);
+    return media.some((item) => item.type === 'image') && media.some((item) => item.type === 'video');
+  }
+
+  onAchievementCardClick(achievement: Achievement): void {
+    if (this.getAchievementMedia(achievement.apiName).length === 0) {
+      return;
+    }
+    this.openMediaViewer(achievement.apiName, 0);
   }
 
   isRevealed(apiName: string): boolean {
@@ -605,11 +582,28 @@ export class GameDetailComponent implements OnInit {
   }
 
   openMediaViewer(apiName: string, startIndex: number): void {
-    this.viewerMedia.set(this.getAchievementMedia(apiName));
+    this.viewerMedia.set(this.sortMediaForCarousel(this.getAchievementMedia(apiName)));
     this.viewerStartIndex.set(startIndex);
   }
 
   closeMediaViewer(): void {
     this.viewerMedia.set([]);
+  }
+
+  private groupMediaByAchievement(media: AchievementMedia[]): Record<string, AchievementMedia[]> {
+    return media.reduce<Record<string, AchievementMedia[]>>((acc, item) => {
+      const list = acc[item.achievementApiName] ?? [];
+      acc[item.achievementApiName] = this.sortMediaForCarousel([...list, item]);
+      return acc;
+    }, {});
+  }
+
+  private sortMediaForCarousel(media: AchievementMedia[]): AchievementMedia[] {
+    return [...media].sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'image' ? -1 : 1;
+      }
+      return new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime();
+    });
   }
 }
