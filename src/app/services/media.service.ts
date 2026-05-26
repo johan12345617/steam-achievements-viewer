@@ -80,7 +80,6 @@ export class MediaService {
       {
         appId: payload.appId,
         type: payload.type,
-        caption: payload.caption,
         fileName: payload.file.name,
         contentType: payload.file.type,
         sizeBytes: payload.file.size,
@@ -123,11 +122,18 @@ export class MediaService {
     return this.http.delete<void>(`${this.api}/media/${mediaId}`, { withCredentials: true }).pipe(map(() => undefined));
   }
 
-  getGameMedia(appId: number): Observable<AchievementMedia[]> {
+  getGameMedia(appId: number, achievementApiNames: string[] = []): Observable<AchievementMedia[]> {
     if (environment.offlineMode) {
       const allMedia: AchievementMedia[] = [];
       this.mockMediaStore.forEach((list) => allMedia.push(...list.filter((m) => m.appId === appId)));
       return of(allMedia).pipe(delay(400));
+    }
+    if (achievementApiNames.length > 0) {
+      return this.http.post<AchievementMedia[]>(
+        `${this.api}/media/game/${appId}/resolve`,
+        { achievementApiNames },
+        { withCredentials: true },
+      );
     }
     return this.http.get<AchievementMedia[]>(`${this.api}/media/game/${appId}`, { withCredentials: true });
   }

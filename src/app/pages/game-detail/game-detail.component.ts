@@ -467,7 +467,8 @@ export class GameDetailComponent implements OnInit {
         this.gameStats.set(stats);
         this.loading.set(false);
 
-        this.mediaService.getGameMedia(appIdParam).subscribe({
+        const unlockedNames = stats.achievements.filter((a) => a.achieved).map((a) => a.apiName);
+        this.mediaService.getGameMedia(appIdParam, unlockedNames).subscribe({
           next: (media) => this.mediaStore.set(this.groupMediaByAchievement(media)),
           error: () => this.mediaStore.set({}),
         });

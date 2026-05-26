@@ -6,19 +6,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  _Object,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MediaEntity } from './entities/media.entity';
-import { v4 as uuidv4 } from 'uuid';
-import * as fs from 'fs';
 import * as path from 'path';
 
 export interface CreateMediaUploadInput {
@@ -29,7 +27,6 @@ export interface CreateMediaUploadInput {
   fileName: string;
   contentType: string;
   sizeBytes: number;
-  caption?: string;
 }
 
 export interface MediaUploadTicket {
@@ -41,47 +38,36 @@ export interface MediaUploadTicket {
 
 const SIGNED_READ_EXPIRES_SECONDS = 15 * 60;
 const SIGNED_UPLOAD_EXPIRES_SECONDS = 5 * 60;
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov'];
 
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
-  private readonly uploadsDir = path.join(process.cwd(), 'uploads');
   private s3Client: S3Client | null = null;
 
-  constructor(
-    @InjectRepository(MediaEntity)
-    private readonly mediaRepository: Repository<MediaEntity>,
-    private readonly configService: ConfigService,
-  ) {}
+  constructor(private readonly configService: ConfigService) {}
 
   async createUploadTicket(input: CreateMediaUploadInput): Promise<MediaUploadTicket> {
     this.assertR2Configured();
 
-    const id = uuidv4();
     const ext = this.getExtFromFile(input.fileName, input.contentType);
     const safeAchievement = this.safeKeySegment(input.achievementApiName);
-    const objectKey = `users/${input.ownerSteamId}/games/${input.appId}/achievements/${safeAchievement}/media/${id}${ext}`;
-    const recordKey = `users/${input.ownerSteamId}/games/${input.appId}/achievements/${safeAchievement}/records/${id}.json`;
-
-    const entity = this.mediaRepository.create({
-      id,
+    const filename = `${input.type}${ext}`;
+    const objectKey = this.mediaObjectKey(input.ownerSteamId, input.appId, safeAchievement, filename);
+    const media = this.createMediaEntity({
       ownerSteamId: input.ownerSteamId,
       achievementApiName: input.achievementApiName,
       appId: input.appId,
       type: input.type,
-      url: objectKey,
-      thumbnailUrl: null,
-      caption: input.caption ?? null,
-      filename: `${id}${ext}`,
+      filename,
       objectKey,
-      recordKey,
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
-      status: 'pending',
+      uploadedAt: new Date(),
     });
-    await this.mediaRepository.save(entity);
 
-    const metadata = this.buildObjectMetadata(entity);
+    const metadata = this.buildObjectMetadata(media);
     const uploadUrl = await getSignedUrl(
       this.client,
       new PutObjectCommand({
@@ -94,7 +80,7 @@ export class MediaService {
     );
 
     return {
-      media: entity,
+      media,
       uploadUrl,
       headers: {
         'Content-Type': input.contentType,
@@ -103,72 +89,171 @@ export class MediaService {
     };
   }
 
-  async completeUpload(ownerSteamId: string, id: string): Promise<MediaEntity> {
-    const entity = await this.findOwnedMedia(ownerSteamId, id);
-    if (entity.status === 'ready') {
-      return this.withSignedUrls(entity);
+  async completeUpload(ownerSteamId: string, mediaId: string): Promise<MediaEntity> {
+    const parts = this.parseMediaId(mediaId);
+    if (!parts || parts.ownerSteamId !== ownerSteamId) {
+      throw new NotFoundException(`Media item with id ${mediaId} not found`);
     }
 
-    const record = {
-      id: entity.id,
-      ownerSteamId: entity.ownerSteamId,
-      appId: entity.appId,
-      achievementApiName: entity.achievementApiName,
-      type: entity.type,
-      caption: entity.caption,
-      filename: entity.filename,
-      objectKey: entity.objectKey,
-      contentType: entity.contentType,
-      sizeBytes: entity.sizeBytes,
-      uploadedAt: entity.uploadedAt,
-    };
-
-    await this.assertUploadedObjectExists(entity.objectKey);
-    await this.putRecord(entity.recordKey, record);
-    entity.status = 'ready';
-    await this.mediaRepository.save(entity);
-    return this.withSignedUrls(entity);
+    await this.assertUploadedObjectExists(parts.objectKey);
+    const media = this.createMediaEntity({
+      ownerSteamId,
+      achievementApiName: parts.achievementApiName,
+      appId: parts.appId,
+      type: parts.type,
+      filename: parts.filename,
+      objectKey: parts.objectKey,
+      contentType: this.contentTypeFromFilename(parts.filename),
+      uploadedAt: new Date(),
+    });
+    return this.withSignedUrls(media);
   }
 
   async findByAchievement(ownerSteamId: string, achievementApiName: string, appId: number): Promise<MediaEntity[]> {
-    const media = await this.mediaRepository.find({
-      where: { ownerSteamId, achievementApiName, appId, status: 'ready' },
-      order: { uploadedAt: 'DESC' },
-    });
+    const media = await this.findMediaForAchievement(ownerSteamId, appId, achievementApiName);
     return Promise.all(media.map((item) => this.withSignedUrls(item)));
   }
 
-  async findByGame(ownerSteamId: string, appId: number): Promise<MediaEntity[]> {
-    const media = await this.mediaRepository.find({
-      where: { ownerSteamId, appId, status: 'ready' },
-      order: { uploadedAt: 'DESC' },
-    });
+  async findByGame(
+    ownerSteamId: string,
+    appId: number,
+    achievementApiNames: string[] = [],
+  ): Promise<MediaEntity[]> {
+    if (achievementApiNames.length > 0) {
+      const nested = await Promise.all(
+        achievementApiNames.map((achievementApiName) =>
+          this.findMediaForAchievement(ownerSteamId, appId, achievementApiName),
+        ),
+      );
+      return Promise.all(nested.flat().map((item) => this.withSignedUrls(item)));
+    }
+
+    const prefix = `users/${ownerSteamId}/games/${appId}/achievements/`;
+    const objects = await this.listObjects(prefix);
+    const byAchievement = new Map<string, _Object[]>();
+
+    for (const object of objects) {
+      if (!object.Key || !object.Key.includes('/media/')) {
+        continue;
+      }
+      const match = object.Key.match(/^users\/[^/]+\/games\/\d+\/achievements\/([^/]+)\/media\/[^/]+$/);
+      if (!match) {
+        continue;
+      }
+      const achievementApiName = match[1];
+      const list = byAchievement.get(achievementApiName) ?? [];
+      list.push(object);
+      byAchievement.set(achievementApiName, list);
+    }
+
+    const media = [...byAchievement.entries()].flatMap(([achievementApiName, achievementObjects]) =>
+      this.pickAchievementMedia(ownerSteamId, appId, achievementApiName, achievementObjects),
+    );
     return Promise.all(media.map((item) => this.withSignedUrls(item)));
   }
 
-  async delete(ownerSteamId: string, id: string): Promise<{ deleted: boolean }> {
-    const entity = await this.findOwnedMedia(ownerSteamId, id);
-
-    if (entity.objectKey) {
-      await this.deleteR2Object(entity.objectKey);
-    } else {
-      await this.deleteLocalFile(entity.filename);
+  async delete(ownerSteamId: string, mediaId: string): Promise<{ deleted: boolean }> {
+    const parts = this.parseMediaId(mediaId);
+    if (!parts || parts.ownerSteamId !== ownerSteamId) {
+      throw new NotFoundException(`Media item with id ${mediaId} not found`);
     }
 
-    if (entity.recordKey) {
-      await this.deleteR2Object(entity.recordKey);
-    }
-
-    await this.mediaRepository.remove(entity);
+    await this.deleteR2Object(parts.objectKey);
     return { deleted: true };
   }
 
-  private async findOwnedMedia(ownerSteamId: string, id: string): Promise<MediaEntity> {
-    const entity = await this.mediaRepository.findOne({ where: { id, ownerSteamId } });
-    if (!entity) {
-      throw new NotFoundException(`Media item with id ${id} not found`);
-    }
-    return entity;
+  private async findMediaForAchievement(
+    ownerSteamId: string,
+    appId: number,
+    achievementApiName: string,
+  ): Promise<MediaEntity[]> {
+    const safeAchievement = this.safeKeySegment(achievementApiName);
+    const prefix = this.mediaPrefix(ownerSteamId, appId, safeAchievement);
+    const objects = await this.listObjects(prefix);
+    return this.pickAchievementMedia(ownerSteamId, appId, achievementApiName, objects);
+  }
+
+  private pickAchievementMedia(
+    ownerSteamId: string,
+    appId: number,
+    achievementApiName: string,
+    objects: _Object[],
+  ): MediaEntity[] {
+    const latestImage = this.latestObjectByType(objects, 'image');
+    const latestVideo = this.latestObjectByType(objects, 'video');
+    return [latestImage, latestVideo]
+      .filter((object): object is _Object & { Key: string } => Boolean(object?.Key))
+      .map((object) => {
+        const filename = path.posix.basename(object.Key);
+        const type = this.mediaTypeFromFilename(filename);
+        return this.createMediaEntity({
+          ownerSteamId,
+          achievementApiName,
+          appId,
+          type,
+          filename,
+          objectKey: object.Key,
+          contentType: this.contentTypeFromFilename(filename),
+          sizeBytes: object.Size ?? 0,
+          uploadedAt: object.LastModified ?? new Date(),
+        });
+      });
+  }
+
+  private latestObjectByType(objects: _Object[], type: 'image' | 'video'): _Object | null {
+    const extensions = type === 'image' ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS;
+    return objects
+      .filter((object) => object.Key && extensions.includes(path.posix.extname(object.Key).toLowerCase()))
+      .sort((a, b) => (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0))[0] ?? null;
+  }
+
+  private async listObjects(prefix: string): Promise<_Object[]> {
+    const objects: _Object[] = [];
+    let token: string | undefined;
+
+    do {
+      const response = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucketName,
+          Prefix: prefix,
+          ContinuationToken: token,
+        }),
+      );
+      objects.push(...(response.Contents ?? []));
+      token = response.NextContinuationToken;
+    } while (token);
+
+    return objects;
+  }
+
+  private createMediaEntity(input: {
+    ownerSteamId: string;
+    achievementApiName: string;
+    appId: number;
+    type: 'image' | 'video';
+    filename: string;
+    objectKey: string;
+    contentType?: string | null;
+    sizeBytes?: number;
+    uploadedAt: Date;
+  }): MediaEntity {
+    return {
+      id: this.mediaId(input.objectKey),
+      ownerSteamId: input.ownerSteamId,
+      achievementApiName: input.achievementApiName,
+      appId: input.appId,
+      type: input.type,
+      url: input.objectKey,
+      thumbnailUrl: input.type === 'image' ? input.objectKey : null,
+      caption: null,
+      filename: input.filename,
+      objectKey: input.objectKey,
+      recordKey: null,
+      contentType: input.contentType ?? null,
+      sizeBytes: input.sizeBytes ?? 0,
+      status: 'ready',
+      uploadedAt: input.uploadedAt,
+    };
   }
 
   private async withSignedUrls(entity: MediaEntity): Promise<MediaEntity> {
@@ -184,28 +269,10 @@ export class MediaService {
       );
       clone.thumbnailUrl = entity.type === 'image' ? clone.url : null;
     }
-    return clone as MediaEntity;
+    return clone;
   }
 
-  private async putRecord(recordKey: string | null, record: unknown): Promise<void> {
-    if (!recordKey) {
-      return;
-    }
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: recordKey,
-        ContentType: 'application/json',
-        Body: JSON.stringify(record, null, 2),
-      }),
-    );
-  }
-
-  private async assertUploadedObjectExists(objectKey: string | null): Promise<void> {
-    if (!objectKey) {
-      throw new InternalServerErrorException('Media object key is missing');
-    }
-
+  private async assertUploadedObjectExists(objectKey: string): Promise<void> {
     try {
       await this.client.send(
         new HeadObjectCommand({
@@ -231,14 +298,43 @@ export class MediaService {
     }
   }
 
-  private async deleteLocalFile(filename: string): Promise<void> {
-    const filePath = path.join(this.uploadsDir, filename);
+  private mediaPrefix(ownerSteamId: string, appId: number, achievementApiName: string): string {
+    return `users/${ownerSteamId}/games/${appId}/achievements/${achievementApiName}/media/`;
+  }
+
+  private mediaObjectKey(ownerSteamId: string, appId: number, achievementApiName: string, filename: string): string {
+    return `${this.mediaPrefix(ownerSteamId, appId, achievementApiName)}${filename}`;
+  }
+
+  private mediaId(objectKey: string): string {
+    return Buffer.from(objectKey).toString('base64url');
+  }
+
+  private parseMediaId(mediaId: string): {
+    ownerSteamId: string;
+    appId: number;
+    achievementApiName: string;
+    type: 'image' | 'video';
+    filename: string;
+    objectKey: string;
+  } | null {
     try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      const objectKey = Buffer.from(mediaId, 'base64url').toString('utf8');
+      const match = objectKey.match(/^users\/([^/]+)\/games\/(\d+)\/achievements\/([^/]+)\/media\/([^/]+)$/);
+      if (!match) {
+        return null;
       }
-    } catch (err) {
-      this.logger.warn(`Could not delete file ${filePath}: ${err?.message}`);
+      const filename = match[4];
+      return {
+        ownerSteamId: match[1],
+        appId: Number(match[2]),
+        achievementApiName: match[3],
+        type: this.mediaTypeFromFilename(filename),
+        filename,
+        objectKey,
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -247,7 +343,6 @@ export class MediaService {
       steamid: entity.ownerSteamId,
       appid: String(entity.appId),
       achievement: this.safeMetadataValue(entity.achievementApiName),
-      mediaid: entity.id,
       type: entity.type,
     };
   }
@@ -268,6 +363,32 @@ export class MediaService {
       'video/quicktime': '.mov',
     };
     return map[mime] || '';
+  }
+
+  private mediaTypeFromFilename(filename: string): 'image' | 'video' {
+    const ext = path.posix.extname(filename).toLowerCase();
+    if (IMAGE_EXTENSIONS.includes(ext)) {
+      return 'image';
+    }
+    if (VIDEO_EXTENSIONS.includes(ext)) {
+      return 'video';
+    }
+    throw new BadRequestException(`Unsupported media file extension: ${ext}`);
+  }
+
+  private contentTypeFromFilename(filename: string): string | null {
+    const ext = path.posix.extname(filename).toLowerCase();
+    const map: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+    };
+    return map[ext] ?? null;
   }
 
   private safeKeySegment(value: string): string {

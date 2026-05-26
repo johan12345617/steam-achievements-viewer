@@ -33,10 +33,13 @@ const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 interface CreateUploadTicketBody {
   appId: number | string;
   type: 'image' | 'video';
-  caption?: string;
   fileName: string;
   contentType: string;
   sizeBytes: number | string;
+}
+
+interface GameMediaBody {
+  achievementApiNames?: string[];
 }
 
 @UseGuards(SteamSessionGuard)
@@ -89,7 +92,6 @@ export class MediaController {
       fileName: body.fileName,
       contentType: body.contentType,
       sizeBytes,
-      caption: body.caption?.slice(0, 200),
     });
   }
 
@@ -107,6 +109,18 @@ export class MediaController {
     @Param('appId', ParseIntPipe) appId: number,
   ): Promise<MediaEntity[]> {
     return this.mediaService.findByGame(this.user(req).steamId, appId);
+  }
+
+  @Post('game/:appId/resolve')
+  async resolveMediaByGame(
+    @Req() req: Request,
+    @Param('appId', ParseIntPipe) appId: number,
+    @Body() body: GameMediaBody,
+  ): Promise<MediaEntity[]> {
+    const achievementApiNames = Array.isArray(body.achievementApiNames)
+      ? body.achievementApiNames.filter((value) => typeof value === 'string' && value.trim())
+      : [];
+    return this.mediaService.findByGame(this.user(req).steamId, appId, achievementApiNames);
   }
 
   @Get(':achievementApiName')
