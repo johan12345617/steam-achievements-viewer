@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { SteamModule } from './steam/steam.module';
 import { MediaModule } from './media/media.module';
 import { AuthModule } from './auth/auth.module';
+import { RetroAchievementsModule } from './retroachievements/retroachievements.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AuthModule } from './auth/auth.module';
     SteamModule,
     MediaModule,
     AuthModule,
+    RetroAchievementsModule,
   ],
 })
 export class AppModule {}

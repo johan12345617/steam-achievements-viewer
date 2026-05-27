@@ -46,6 +46,18 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'retro-games',
+    loadComponent: () =>
+      import('./pages/retro-games/retro-games.component').then((m) => m.RetroGamesComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'retro-games/:gameId',
+    loadComponent: () =>
+      import('./pages/retro-game-detail/retro-game-detail.component').then((m) => m.RetroGameDetailComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: '**',
     redirectTo: '/login',
   },

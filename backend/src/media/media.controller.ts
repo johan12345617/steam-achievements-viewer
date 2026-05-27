@@ -9,8 +9,11 @@ import {
   Post,
   Query,
   Req,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
 import { MediaService, MediaUploadTicket } from './media.service';
 import { MediaEntity } from './entities/media.entity';
@@ -40,6 +43,124 @@ interface CreateUploadTicketBody {
 
 interface GameMediaBody {
   achievementApiNames?: string[];
+}
+
+interface SanUploadBody {
+  ownerSteamId?: string;
+  steam3Id?: string;
+  appId: number | string;
+}
+
+type UploadedMediaFiles = Record<string, Array<{
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}>>;
+
+@Controller('media/san')
+export class SanMediaController {
+  constructor(private readonly mediaService: MediaService) {}
+
+  @Post('achievement/:achievementApiName')
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'image', maxCount: 1 },
+    { name: 'video', maxCount: 1 },
+  ], {
+    limits: {
+      files: 2,
+      fileSize: MAX_VIDEO_SIZE,
+    },
+  }))
+  async uploadAchievementMedia(
+    @Param('achievementApiName') achievementApiName: string,
+    @Body() body: SanUploadBody,
+    @UploadedFiles() files: UploadedMediaFiles,
+  ): Promise<{ media: MediaEntity[] }> {
+    const appId = Number(body.appId);
+    const ownerSteamId = this.resolveOwnerSteamId(body);
+
+    if (!Number.isInteger(appId) || appId <= 0) {
+      throw new BadRequestException('appId must be a valid positive number');
+    }
+    if (!achievementApiName?.trim()) {
+      throw new BadRequestException('achievementApiName is required');
+    }
+
+    const uploads = [
+      ...(files?.image ?? []).map((file) => ({ type: 'image' as const, file })),
+      ...(files?.video ?? []).map((file) => ({ type: 'video' as const, file })),
+    ];
+
+    if (uploads.length === 0) {
+      throw new BadRequestException('At least one image or video file is required');
+    }
+
+    const media = await Promise.all(
+      uploads.map(({ type, file }) => {
+        this.validateFile(type, file);
+        return this.mediaService.uploadDirect({
+          ownerSteamId,
+          achievementApiName,
+          appId,
+          type,
+          fileName: file.originalname,
+          contentType: file.mimetype,
+          sizeBytes: file.size,
+          buffer: file.buffer,
+        });
+      }),
+    );
+
+    return { media };
+  }
+
+  private resolveOwnerSteamId(body: SanUploadBody): string {
+    if (body.ownerSteamId && /^\d{17}$/.test(body.ownerSteamId)) {
+      return body.ownerSteamId;
+    }
+
+    if (body.steam3Id && /^\d+$/.test(body.steam3Id)) {
+      return this.addDecimalStrings('76561197960265728', body.steam3Id);
+    }
+
+    throw new BadRequestException('ownerSteamId or steam3Id is required');
+  }
+
+  private validateFile(type: 'image' | 'video', file: UploadedMediaFiles[string][number]): void {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException(`${type} file is empty`);
+    }
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new BadRequestException(`File type "${file.mimetype}" is not allowed`);
+    }
+    if (type === 'image' && !file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('Image upload does not match the file content type');
+    }
+    if (type === 'video' && !file.mimetype.startsWith('video/')) {
+      throw new BadRequestException('Video upload does not match the file content type');
+    }
+
+    const maxSize = type === 'image' ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
+    if (file.size > maxSize) {
+      throw new BadRequestException(`File too large. Maximum size is ${Math.floor(maxSize / 1024 / 1024)}MB.`);
+    }
+  }
+
+  private addDecimalStrings(left: string, right: string): string {
+    let carry = 0;
+    let result = '';
+    let i = left.length - 1;
+    let j = right.length - 1;
+
+    while (i >= 0 || j >= 0 || carry > 0) {
+      const sum = (i >= 0 ? Number(left[i--]) : 0) + (j >= 0 ? Number(right[j--]) : 0) + carry;
+      result = String(sum % 10) + result;
+      carry = Math.floor(sum / 10);
+    }
+
+    return result;
+  }
 }
 
 @UseGuards(SteamSessionGuard)

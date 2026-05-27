@@ -55,6 +55,21 @@ import { SteamService } from '../../services/steam.service';
               </svg>
               <span class="hidden sm:block">Games</span>
             </a>
+
+            <a
+              routerLink="/retro-games"
+              routerLinkActive="bg-steam-accent/10 text-steam-accent border-steam-accent/30"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-steam-muted hover:text-steam-text hover:bg-white/5 border border-transparent transition-all duration-200 text-sm font-medium"
+            >
+              <!-- Retro Games icon -->
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M6 8h12a4 4 0 014 4v3a3 3 0 01-5.121 2.121L14.5 14.742h-5l-2.379 2.379A3 3 0 012 15v-3a4 4 0 014-4z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8 12h2m-1-1v2m7-1h.01M18 14h.01" />
+              </svg>
+              <span class="hidden sm:block">Retro Games</span>
+            </a>
           </div>
 
           <!-- Player info + logout -->

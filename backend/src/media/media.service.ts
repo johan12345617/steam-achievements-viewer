@@ -29,6 +29,17 @@ export interface CreateMediaUploadInput {
   sizeBytes: number;
 }
 
+export interface DirectMediaUploadInput {
+  ownerSteamId: string;
+  achievementApiName: string;
+  appId: number;
+  type: 'image' | 'video';
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  buffer: Buffer;
+}
+
 export interface MediaUploadTicket {
   media: MediaEntity;
   uploadUrl: string;
@@ -87,6 +98,38 @@ export class MediaService {
       },
       expiresInSeconds: SIGNED_UPLOAD_EXPIRES_SECONDS,
     };
+  }
+
+  async uploadDirect(input: DirectMediaUploadInput): Promise<MediaEntity> {
+    this.assertR2Configured();
+
+    const ext = this.getExtFromFile(input.fileName, input.contentType);
+    const safeAchievement = this.safeKeySegment(input.achievementApiName);
+    const filename = `${input.type}${ext}`;
+    const objectKey = this.mediaObjectKey(input.ownerSteamId, input.appId, safeAchievement, filename);
+    const media = this.createMediaEntity({
+      ownerSteamId: input.ownerSteamId,
+      achievementApiName: input.achievementApiName,
+      appId: input.appId,
+      type: input.type,
+      filename,
+      objectKey,
+      contentType: input.contentType,
+      sizeBytes: input.sizeBytes,
+      uploadedAt: new Date(),
+    });
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: objectKey,
+        ContentType: input.contentType,
+        Body: input.buffer,
+        Metadata: this.buildObjectMetadata(media),
+      }),
+    );
+
+    return this.withSignedUrls(media);
   }
 
   async completeUpload(ownerSteamId: string, mediaId: string): Promise<MediaEntity> {
