@@ -51,6 +51,13 @@ interface SanUploadBody {
   appId: number | string;
 }
 
+interface SanUploadTicketBody extends SanUploadBody, CreateUploadTicketBody {}
+
+interface SanCompleteUploadBody {
+  ownerSteamId?: string;
+  steam3Id?: string;
+}
+
 type UploadedMediaFiles = Record<string, Array<{
   originalname: string;
   mimetype: string;
@@ -61,6 +68,34 @@ type UploadedMediaFiles = Record<string, Array<{
 @Controller('media/san')
 export class SanMediaController {
   constructor(private readonly mediaService: MediaService) {}
+
+  @Post('upload-url/:achievementApiName')
+  async createUploadTicket(
+    @Param('achievementApiName') achievementApiName: string,
+    @Body() body: SanUploadTicketBody,
+  ): Promise<MediaUploadTicket> {
+    const ownerSteamId = this.resolveOwnerSteamId(body);
+    const { appId, type, sizeBytes } = this.validateUploadTicket(achievementApiName, body);
+
+    return this.mediaService.createUploadTicket({
+      ownerSteamId,
+      achievementApiName,
+      appId,
+      type,
+      fileName: body.fileName,
+      contentType: body.contentType,
+      sizeBytes,
+    });
+  }
+
+  @Post('complete/:mediaId')
+  async completeUpload(
+    @Param('mediaId') mediaId: string,
+    @Body() body: SanCompleteUploadBody,
+  ): Promise<MediaEntity> {
+    const ownerSteamId = this.resolveOwnerSteamId(body);
+    return this.mediaService.completeUpload(ownerSteamId, mediaId);
+  }
 
   @Post('achievement/:achievementApiName')
   @UseInterceptors(FileFieldsInterceptor([
@@ -115,7 +150,7 @@ export class SanMediaController {
     return { media };
   }
 
-  private resolveOwnerSteamId(body: SanUploadBody): string {
+  private resolveOwnerSteamId(body: SanCompleteUploadBody): string {
     if (body.ownerSteamId && /^\d{17}$/.test(body.ownerSteamId)) {
       return body.ownerSteamId;
     }
@@ -125,6 +160,47 @@ export class SanMediaController {
     }
 
     throw new BadRequestException('ownerSteamId or steam3Id is required');
+  }
+
+  private validateUploadTicket(
+    achievementApiName: string,
+    body: CreateUploadTicketBody,
+  ): { appId: number; type: 'image' | 'video'; sizeBytes: number } {
+    const appId = Number(body.appId);
+    const sizeBytes = Number(body.sizeBytes);
+    const type = body.type;
+
+    if (!Number.isInteger(appId) || appId <= 0) {
+      throw new BadRequestException('appId must be a valid positive number');
+    }
+    if (!achievementApiName?.trim()) {
+      throw new BadRequestException('achievementApiName is required');
+    }
+    if (type !== 'image' && type !== 'video') {
+      throw new BadRequestException('type must be "image" or "video"');
+    }
+    if (!body.fileName?.trim()) {
+      throw new BadRequestException('fileName is required');
+    }
+    if (!ALLOWED_MIME_TYPES.includes(body.contentType)) {
+      throw new BadRequestException(`File type "${body.contentType}" is not allowed`);
+    }
+    if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+      throw new BadRequestException('sizeBytes must be a valid positive number');
+    }
+
+    const maxSize = type === 'image' ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
+    if (sizeBytes > maxSize) {
+      throw new BadRequestException(`File too large. Maximum size is ${Math.floor(maxSize / 1024 / 1024)}MB.`);
+    }
+    if (type === 'image' && !body.contentType.startsWith('image/')) {
+      throw new BadRequestException('Selected media type does not match the file content type');
+    }
+    if (type === 'video' && !body.contentType.startsWith('video/')) {
+      throw new BadRequestException('Selected media type does not match the file content type');
+    }
+
+    return { appId, type, sizeBytes };
   }
 
   private validateFile(type: 'image' | 'video', file: UploadedMediaFiles[string][number]): void {
