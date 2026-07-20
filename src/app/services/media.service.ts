@@ -46,9 +46,9 @@ export class MediaService {
   ]);
 
   uploadAchievementMedia(payload: MediaUploadPayload): Observable<AchievementMedia> {
-    const maxSize = payload.type === 'image' ? 10 * 1024 * 1024 : 100 * 1024 * 1024;
+    const maxSize = payload.type === 'image' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
     if (payload.file.size > maxSize) {
-      return throwError(() => new Error(`File too large. Maximum size is ${payload.type === 'image' ? '10MB' : '100MB'}.`));
+      return throwError(() => new Error(`File too large. Maximum size is ${payload.type === 'image' ? '50MB' : '100MB'}.`));
     }
 
     const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];

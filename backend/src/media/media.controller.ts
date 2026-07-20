@@ -30,7 +30,7 @@ const ALLOWED_MIME_TYPES = [
   'video/quicktime',
 ];
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
 interface CreateUploadTicketBody {

@@ -141,7 +141,7 @@ import { forkJoin } from 'rxjs';
                 <p class="text-steam-muted text-sm mt-1">or click to browse</p>
                 <p class="text-steam-muted text-xs mt-2">
                   @if (selectedType() === 'image') {
-                    JPG, PNG, GIF, WEBP · Max 10MB
+                    JPG, PNG, GIF, WEBP · Max 50MB
                   } @else {
                     MP4, WEBM, MOV · Max 100MB
                   }
