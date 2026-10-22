@@ -31,7 +31,7 @@ interface AuthContextValue {
 const CONFIG_KEY = 'sav.mobile.api';
 const SESSION_KEY = 'sav.mobile.session';
 const PENDING_KEY = 'sav.mobile.pending';
-const DEFAULT_API = normalizeApiBase(process.env.EXPO_PUBLIC_API_URL || Constants.expoConfig?.extra?.apiBase || 'https://steam-achievements-viewer.onrender.com/api');
+const DEFAULT_API = normalizeApiBase(process.env.EXPO_PUBLIC_API_URL || Constants.expoConfig?.extra?.apiBase || 'https://johanstuff.tikraq.pe/api');
 const Context = createContext<AuthContextValue | null>(null);
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 

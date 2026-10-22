@@ -18,7 +18,7 @@ explicitly labeled illustrative data.
 
 ## Configuration
 
-The user confirmed https://steam-achievements-viewer.onrender.com as the backend.
+The user confirmed https://johanstuff.tikraq.pe as the backend.
 Its API prefix is /api. Public build configuration belongs in mobile/.env. Steam
 API keys, the cookie signing secret, RetroAchievements keys, and R2 credentials
 remain exclusively in backend environment variables.

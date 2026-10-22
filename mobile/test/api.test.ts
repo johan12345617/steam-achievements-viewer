@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ApiError, createApiClient, normalizeApiBase } from '../src/lib/api';
 
 test('normalizes hosted and local backend configuration', () => {
-  assert.equal(normalizeApiBase(' https://steam-achievements-viewer.onrender.com/ '), 'https://steam-achievements-viewer.onrender.com/api');
+  assert.equal(normalizeApiBase(' https://johanstuff.tikraq.pe/ '), 'https://johanstuff.tikraq.pe/api');
   assert.equal(normalizeApiBase('https://example.com/api/'), 'https://example.com/api');
   assert.equal(normalizeApiBase('http://10.0.2.2:3000/api'), 'http://10.0.2.2:3000/api');
   assert.equal(normalizeApiBase('http://192.168.1.10:3000'), 'http://192.168.1.10:3000/api');

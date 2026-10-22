@@ -31,7 +31,7 @@ const config: ExpoConfig = {
     ['expo-build-properties', { android: { usesCleartextTraffic: process.env.ALLOW_LOCAL_HTTP === 'true' } }],
   ],
   extra: {
-    apiBase: process.env.EXPO_PUBLIC_API_URL || 'https://steam-achievements-viewer.onrender.com/api',
+    apiBase: process.env.EXPO_PUBLIC_API_URL || 'https://johanstuff.tikraq.pe/api',
   },
 };
 

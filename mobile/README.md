@@ -29,7 +29,7 @@ Copy-Item .env.example .env  # only when .env does not exist
 The configured `.env` for this delivery uses:
 
 ```dotenv
-EXPO_PUBLIC_API_URL=https://steam-achievements-viewer.onrender.com/api
+EXPO_PUBLIC_API_URL=https://johanstuff.tikraq.pe/api
 APP_NAME=Steam Achievements
 ANDROID_PACKAGE=com.steamachievements.viewer
 IOS_BUNDLE_IDENTIFIER=com.steamachievements.viewer
@@ -64,7 +64,7 @@ Deploy the updated `backend/` code to the confirmed Render service. Keep its
 existing secrets, and set:
 
 ```dotenv
-BACKEND_URL=https://steam-achievements-viewer.onrender.com
+BACKEND_URL=https://johanstuff.tikraq.pe
 NODE_ENV=production
 ```
 
