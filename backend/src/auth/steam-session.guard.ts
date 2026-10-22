@@ -1,15 +1,15 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
-import { readSteamSession } from './steam-session';
+import { MobileAuthService } from './mobile-auth.service';
 
 @Injectable()
 export class SteamSessionGuard implements CanActivate {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService, private readonly mobileAuth: MobileAuthService) {}
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    const user = readSteamSession(request, this.sessionSecret);
+    const user = this.mobileAuth.readSession(request, this.sessionSecret);
     if (!user) {
       throw new UnauthorizedException('Sign in with Steam to manage achievement media.');
     }

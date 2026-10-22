@@ -1,18 +1,51 @@
-import { Controller, Get, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Post, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import {
   clearSteamSessionCookie,
   createSteamSessionCookie,
-  readSteamSession,
   setSteamSessionCookie,
   SteamSessionUser,
 } from './steam-session';
+import { MobileAuthService, MOBILE_REDIRECT_URI } from './mobile-auth.service';
+import { SteamCallbackGuard } from './steam-callback.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService, private readonly mobileAuth: MobileAuthService) {}
+
+  @Get('mobile/config')
+  @Header('Cache-Control', 'no-store')
+  mobileConfig() {
+    return { enabled: true, version: 1, redirectUri: MOBILE_REDIRECT_URI, codeChallengeMethod: 'S256' };
+  }
+
+  @Post('mobile/start')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  mobileStart(@Body() body: unknown) {
+    return this.mobileAuth.start(body);
+  }
+
+  @Get('mobile/steam')
+  mobileSteam(@Query('transaction') transaction: unknown, @Res() res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    return res.redirect(this.mobileAuth.launch(transaction, res));
+  }
+
+  @Post('mobile/exchange')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  mobileExchange(@Body() body: unknown) {
+    return this.mobileAuth.exchange(body);
+  }
 
   /**
    * GET /api/auth/steam
@@ -30,9 +63,13 @@ export class AuthController {
    * Extracts the steamId and redirects to the Angular frontend.
    */
   @Get('steam/callback')
-  @UseGuards(AuthGuard('steam'))
+  @UseGuards(SteamCallbackGuard)
   steamCallback(@Req() req: Request, @Res() res: Response) {
     const user = req.user as SteamSessionUser | undefined;
+
+    if (typeof req.query.mobile === 'string') {
+      return res.redirect(this.mobileAuth.complete(req.query.mobile, user, res));
+    }
 
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
 
@@ -46,8 +83,9 @@ export class AuthController {
   }
 
   @Get('me')
+  @Header('Cache-Control', 'no-store')
   getSession(@Req() req: Request): SteamSessionUser {
-    const user = readSteamSession(req, this.sessionSecret);
+    const user = this.mobileAuth.readSession(req, this.sessionSecret);
     if (!user) {
       throw new UnauthorizedException('No active Steam session.');
     }
@@ -55,7 +93,10 @@ export class AuthController {
   }
 
   @Post('logout')
-  logout(@Res() res: Response) {
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  logout(@Req() req: Request, @Res() res: Response) {
+    this.mobileAuth.logout(req);
     clearSteamSessionCookie(res, this.isProduction);
     return res.json({ ok: true });
   }

@@ -32,3 +32,13 @@ npm-debug.log*
 
 #Claude code
 .claude/
+
+# Local mobile tooling, generated native projects and test builds
+.mobile-tools/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/artifacts/
+mobile/test-results/
+*.keystore
+*.jks

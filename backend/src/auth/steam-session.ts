@@ -28,27 +28,29 @@ export function createSteamSessionCookie(user: SteamSessionUser, secret: string)
 }
 
 export function readSteamSession(req: Request, secret: string): SteamSessionUser | null {
-  const rawCookie = req.headers.cookie ?? '';
-  const cookies = parseCookieHeader(rawCookie);
-  const token = cookies[STEAM_SESSION_COOKIE];
+  const token = readCookie(req.headers.cookie, STEAM_SESSION_COOKIE);
   if (!token) {
     return null;
   }
 
-  const [encodedPayload, signature] = token.split('.');
-  if (!encodedPayload || !signature || !isValidSignature(encodedPayload, signature, secret)) {
+  const parts = token.split('.');
+  const [encodedPayload, signature] = parts;
+  if (parts.length !== 2 || !/^[A-Za-z0-9_-]+$/.test(encodedPayload) ||
+      !/^[A-Za-z0-9_-]{43}$/.test(signature) || !isValidSignature(encodedPayload, signature, secret)) {
     return null;
   }
 
   try {
     const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')) as SteamSessionPayload;
-    if (!payload.steamId || payload.exp < Date.now()) {
+    if (!payload || typeof payload.steamId !== 'string' || !/^\d{17}$/.test(payload.steamId) ||
+        !Number.isFinite(payload.exp) || payload.exp <= Date.now() ||
+        !Number.isFinite(payload.iat) || payload.iat > Date.now() || payload.exp <= payload.iat) {
       return null;
     }
     return {
       steamId: payload.steamId,
-      displayName: payload.displayName ?? '',
-      avatar: payload.avatar ?? '',
+      displayName: typeof payload.displayName === 'string' ? payload.displayName : '',
+      avatar: typeof payload.avatar === 'string' ? payload.avatar : '',
     };
   } catch {
     return null;
@@ -74,19 +76,26 @@ export function clearSteamSessionCookie(res: Response, isProduction: boolean): v
   });
 }
 
-function parseCookieHeader(header: string): Record<string, string> {
-  return header.split(';').reduce<Record<string, string>>((acc, part) => {
+export function readCookie(header: string | undefined, name: string): string | null {
+  if (typeof header !== 'string' || header.length > 16384) return null;
+  let result: string | null = null;
+  for (const part of header.split(';')) {
     const index = part.indexOf('=');
     if (index === -1) {
-      return acc;
+      continue;
     }
     const key = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
-    if (key) {
-      acc[key] = decodeURIComponent(value);
+    if (key === name) {
+      if (result !== null) return null;
+      try {
+        result = decodeURIComponent(value);
+      } catch {
+        return null;
+      }
     }
-    return acc;
-  }, {});
+  }
+  return result;
 }
 
 function sign(value: string, secret: string): string {

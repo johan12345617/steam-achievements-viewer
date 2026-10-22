@@ -23,6 +23,17 @@ A full-stack achievement tracker for Steam and RetroAchievements. Browse your ga
 
 Steam profiles must expose their game details publicly for the app to retrieve owned games and achievement progress.
 
+## Android mobile app
+
+The native React Native + Expo app is in [`mobile/`](mobile/README.md). It uses
+NativeWind/Tailwind, supports Steam and RetroAchievements, and builds a standalone
+test APK with `npm run apk` from that directory. Public build settings are loaded
+from `mobile/.env` (copy `mobile/.env.example` for a fresh checkout).
+
+Deploy the updated backend before testing Steam sign-in in the APK; mobile login
+uses a browser-to-app code exchange instead of sharing the web browser's cookie.
+See [`backend/MOBILE_AUTH.md`](backend/MOBILE_AUTH.md) for configuration and tests.
+
 ## Getting started
 
 ### 1. Install dependencies
@@ -143,6 +154,9 @@ steam-achievements-viewer/
 The frontend includes mock Steam data and in-memory media for UI development. To use it, set `offlineMode` to `true` in the relevant file under `src/environments/`, then restart the Angular development server. Mock media is temporary and disappears when the page is reloaded.
 
 ## Production notes
+
+For deployment on a friend's server or a VPS, see the [backend hosting handoff](backend/HOSTING.md)
+for the exact environment variables, build/start commands, and mobile connection check.
 
 - Set `NODE_ENV=production` and use a strong `AUTH_COOKIE_SECRET`.
 - Update `FRONTEND_URL`, `BACKEND_URL`, and `CORS_ORIGIN` to the deployed HTTPS origins.

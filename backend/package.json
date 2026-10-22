@@ -7,6 +7,7 @@
   "license": "MIT",
   "scripts": {
     "build": "nest build",
+    "test": "npm run build && node --test test/*.test.cjs",
     "format": "prettier --write \"src/**/*.ts\"",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
