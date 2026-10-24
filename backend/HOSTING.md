@@ -18,8 +18,9 @@ Do not commit a populated `.env` or put server secrets in the mobile app.
 
 ## What the host provides
 
-- Node.js 22 with npm; the backend was tested on Node 22.22.3. Use an up-to-date
-  Node 22 patch. [Node release status](https://nodejs.org/en/about/previous-releases).
+- Node.js 22 with npm, at least 22.23.4 (October 2026 security release). The
+  included `Dockerfile` pins that version; prefer it over host-provided Node.
+  [Node release status](https://nodejs.org/en/about/previous-releases).
 - One shared vCPU, 512 MiB available to the app (1 GiB gives more headroom), and
   1–2 GiB application disk space, excluding the OS and container images.
 - A public HTTPS origin, for example `https://api.example.com`, with a valid

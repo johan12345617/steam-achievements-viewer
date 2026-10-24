@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { rejectEncodedBodies } from './reject-encoded-bodies';
 import * as helmet from 'helmet';
 import { join } from 'path';
 import * as fs from 'fs';
@@ -20,6 +21,8 @@ async function bootstrap() {
   });
 
   // Security
+  // Nest registers its body parsers when the app initializes, so this runs before them.
+  app.use(rejectEncodedBodies);
   app.use((helmet as any).default ? (helmet as any).default() : (helmet as any)());
 
   // CORS
